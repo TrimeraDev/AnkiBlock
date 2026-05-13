@@ -23,6 +23,7 @@ class _BlockingScreenState extends ConsumerState<BlockingScreen> {
   Widget build(BuildContext context) {
     final appsAsync = ref.watch(installedAppsProvider);
     final blockedAsync = ref.watch(blockedAppsProvider);
+    final loadingApps = appsAsync.isLoading;
 
     return Scaffold(
       appBar: AppBar(
@@ -33,9 +34,17 @@ class _BlockingScreenState extends ConsumerState<BlockingScreen> {
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: loadingApps
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh),
             tooltip: 'Refresh',
-            onPressed: () => ref.invalidate(installedAppsProvider),
+            onPressed: loadingApps
+                ? null
+                : () => ref.invalidate(installedAppsProvider),
           ),
           PopupMenuButton<_SortMode>(
             icon: const Icon(Icons.sort),
@@ -49,7 +58,11 @@ class _BlockingScreenState extends ConsumerState<BlockingScreen> {
         ],
       ),
       body: appsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        // Default is true: refresh/invalidate keeps showing old data with no
+        // loading affordance while native work runs (often 1–2s). Show the
+        // loading UI whenever we are waiting on the future.
+        skipLoadingOnRefresh: false,
+        loading: () => const _BlockingLoadingBody(),
         error: (e, _) => _ErrorView(
             error: e,
             onRetry: () {
@@ -173,6 +186,58 @@ class _BlockingScreenState extends ConsumerState<BlockingScreen> {
 }
 
 enum _SortMode { usage, name }
+
+/// Full-screen loading state while native code gathers installed apps,
+/// icons, and usage stats (can take a second or two on a cold start).
+class _BlockingLoadingBody extends StatelessWidget {
+  const _BlockingLoadingBody();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Semantics(
+              label: 'Loading app list',
+              child: const SizedBox(
+                width: 48,
+                height: 48,
+                child: CircularProgressIndicator(strokeWidth: 3),
+              ),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              'Loading app list',
+              style: theme.textTheme.titleLarge,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Gathering installed apps, icons, and the last 7 days of screen '
+              'time. This can take a moment.',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 28),
+            SizedBox(
+              width: 200,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: const LinearProgressIndicator(minHeight: 4),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _SearchBar extends StatelessWidget {
   final ValueChanged<String> onChanged;
