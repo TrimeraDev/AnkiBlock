@@ -1,0 +1,178 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:flutter/services.dart';
+
+class GateRequest {
+  final String packageName;
+  final String appName;
+  GateRequest(this.packageName, this.appName);
+}
+
+class InstalledApp {
+  final String packageName;
+  final String appName;
+  final bool isSystem;
+  final Uint8List? icon;
+  final Duration usage;
+
+  InstalledApp({
+    required this.packageName,
+    required this.appName,
+    required this.isSystem,
+    this.icon,
+    this.usage = Duration.zero,
+  });
+
+  InstalledApp copyWith({Duration? usage}) => InstalledApp(
+        packageName: packageName,
+        appName: appName,
+        isSystem: isSystem,
+        icon: icon,
+        usage: usage ?? this.usage,
+      );
+}
+
+/// Common social / distracting apps. Used to auto-select on first scan.
+const Set<String> kSuggestedBlockPackages = {
+  // Social
+  'com.zhiliaoapp.musically', // TikTok (intl)
+  'com.ss.android.ugc.trill', // TikTok (other regions)
+  'com.instagram.android',
+  'com.facebook.katana',
+  'com.facebook.lite',
+  'com.snapchat.android',
+  'com.twitter.android',
+  'com.x.android',
+  'com.reddit.frontpage',
+  'com.pinterest',
+  'com.linkedin.android',
+  'com.discord',
+  // Video
+  'com.google.android.youtube',
+  'com.netflix.mediaclient',
+  'com.amazon.avod.thirdpartyclient',
+  'com.disney.disneyplus',
+  // Messaging that often becomes timesink
+  'org.telegram.messenger',
+  'com.whatsapp',
+  // Games (popular timesinks)
+  'com.king.candycrushsaga',
+  'com.supercell.clashofclans',
+};
+
+class AppsService {
+  static const _channel = MethodChannel('com.ankiblock/permissions');
+
+  AppsService() {
+    _channel.setMethodCallHandler(_handleNativeCall);
+  }
+
+  final _gateController = StreamController<GateRequest>.broadcast();
+  Stream<GateRequest> get gateRequests => _gateController.stream;
+
+  Future<dynamic> _handleNativeCall(MethodCall call) async {
+    if (call.method == 'openGate') {
+      final args = Map<String, dynamic>.from(call.arguments as Map);
+      _gateController.add(GateRequest(
+        args['packageName'] as String? ?? '',
+        args['appName'] as String? ?? '',
+      ));
+    }
+    return null;
+  }
+
+  Future<void> setBlockedPackages(
+      List<({String pkg, String name})> apps) async {
+    if (!Platform.isAndroid) return;
+    final packages = apps.map((a) => a.pkg).toList();
+    final names = {for (final a in apps) a.pkg: a.name};
+    await _channel.invokeMethod('setBlockedPackages', {
+      'packages': packages,
+      'names': names,
+    });
+  }
+
+  Future<void> startAppMonitor() async {
+    if (!Platform.isAndroid) return;
+    await _channel.invokeMethod('startAppMonitor');
+  }
+
+  Future<void> stopAppMonitor() async {
+    if (!Platform.isAndroid) return;
+    await _channel.invokeMethod('stopAppMonitor');
+  }
+
+  Future<void> grantTempUnlock(String packageName) async {
+    if (!Platform.isAndroid) return;
+    await _channel.invokeMethod('grantTempUnlock', {
+      'packageName': packageName,
+    });
+  }
+
+  Future<bool> launchApp(String packageName) async {
+    if (!Platform.isAndroid) return false;
+    final ok = await _channel.invokeMethod<bool>('launchApp', {
+      'packageName': packageName,
+    });
+    return ok ?? false;
+  }
+
+  Future<GateRequest?> consumePendingGate() async {
+    if (!Platform.isAndroid) return null;
+    final raw = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+      'consumePendingGate',
+    );
+    if (raw == null) return null;
+    return GateRequest(
+      raw['packageName'] as String? ?? '',
+      raw['appName'] as String? ?? '',
+    );
+  }
+
+  Future<List<InstalledApp>> listInstalledApps({bool icons = true}) async {
+    if (!Platform.isAndroid) return const [];
+    final raw = await _channel.invokeMethod<List<dynamic>>(
+      'getInstalledApps',
+      {'icons': icons},
+    );
+    if (raw == null) return const [];
+    return raw.map((e) {
+      final m = Map<String, dynamic>.from(e as Map);
+      return InstalledApp(
+        packageName: m['packageName'] as String,
+        appName: m['appName'] as String,
+        isSystem: (m['isSystem'] as bool?) ?? false,
+        icon: m['icon'] is Uint8List
+            ? m['icon'] as Uint8List
+            : (m['icon'] is List
+                ? Uint8List.fromList(List<int>.from(m['icon']))
+                : null),
+      );
+    }).toList();
+  }
+
+  Future<Map<String, Duration>> getUsageStats({int days = 7}) async {
+    if (!Platform.isAndroid) return const {};
+    final raw = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+      'getUsageStats',
+      {'days': days},
+    );
+    if (raw == null) return const {};
+    final out = <String, Duration>{};
+    raw.forEach((k, v) {
+      final ms = (v as num).toInt();
+      out[k as String] = Duration(milliseconds: ms);
+    });
+    return out;
+  }
+
+  Future<List<InstalledApp>> listAppsWithUsage({int days = 7}) async {
+    final apps = await listInstalledApps();
+    final usage = await getUsageStats(days: days);
+    return apps
+        .map((a) => a.copyWith(usage: usage[a.packageName] ?? Duration.zero))
+        .toList();
+  }
+}
