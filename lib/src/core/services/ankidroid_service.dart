@@ -105,12 +105,14 @@ class AnkiDroidUnavailable implements Exception {
   String toString() => 'AnkiDroidUnavailable: $message';
 }
 
-/// Talks to AnkiDroid via the `com.ankiblock/ankidroid` MethodChannel.
+/// Talks to AnkiDroid via the `com.ankiblock/ankidroid` MethodChannel, and
+/// to the SAF-backed media folder via `com.ankiblock/ankidroid_media`.
 ///
 /// Every method is a no-op / "false" on non-Android platforms so callers can
 /// use the same API on iOS or desktop without conditional code.
 class AnkiDroidService {
   static const _channel = MethodChannel('com.ankiblock/ankidroid');
+  static const _mediaChannel = MethodChannel('com.ankiblock/ankidroid_media');
 
   bool get _isSupportedPlatform => Platform.isAndroid;
 
@@ -306,6 +308,61 @@ class AnkiDroidService {
     }
     final granted = await hasPermission();
     return AnkiDroidStatus(installed: true, permissionGranted: granted);
+  }
+
+  // ---------------------------------------------------------------- media
+
+  /// True if the user has previously granted us a tree URI to their
+  /// AnkiDroid folder and the grant is still valid.
+  Future<bool> hasMediaAccess() async {
+    if (!_isSupportedPlatform) return false;
+    try {
+      final r = await _mediaChannel.invokeMethod<bool>('hasMediaAccess');
+      return r ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Launches the system folder picker so the user can grant us read access
+  /// to their AnkiDroid folder. Resolves to `true` if the picked folder
+  /// contains a `collection.media` subdirectory.
+  Future<bool> pickAnkiDroidFolder() async {
+    if (!_isSupportedPlatform) return false;
+    try {
+      final r =
+          await _mediaChannel.invokeMethod<bool>('pickAnkiDroidFolder');
+      return r ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Releases the tree URI permission and clears caches. Useful for "use a
+  /// different folder" or recovering from a stale grant.
+  Future<void> forgetMediaFolder() async {
+    if (!_isSupportedPlatform) return;
+    try {
+      await _mediaChannel.invokeMethod('forgetFolder');
+    } catch (_) {}
+  }
+
+  /// Loads a single file from the AnkiDroid media folder. Returns `null` if
+  /// not found, not readable, or the user hasn't granted folder access.
+  ///
+  /// Cards reference media by bare filename (e.g. `<img src="cat.jpg">`),
+  /// so we don't take a path here — only the leaf name.
+  Future<Uint8List?> getMediaBytes(String filename) async {
+    if (!_isSupportedPlatform || filename.isEmpty) return null;
+    try {
+      final r = await _mediaChannel.invokeMethod<Uint8List>(
+        'getMediaBytes',
+        {'filename': filename},
+      );
+      return r;
+    } catch (_) {
+      return null;
+    }
   }
 
   Exception _mapException(PlatformException e) {

@@ -104,6 +104,8 @@ class _Body extends ConsumerWidget {
             trailing: const Icon(Icons.chevron_right),
             onTap: () => context.push('/decks'),
           ),
+          const _SectionHeader(label: 'Media'),
+          const _MediaFolderTile(),
           ListTile(
             leading: const Icon(Icons.open_in_new),
             title: const Text('Open AnkiDroid'),
@@ -195,6 +197,80 @@ class _StatusTile extends ConsumerWidget {
         },
       ),
     );
+  }
+}
+
+/// Lets the user grant SAF access to their AnkiDroid folder so card media
+/// (images, audio) can resolve inside the WebView. Without this, cards still
+/// render — just with broken `<img>` icons.
+class _MediaFolderTile extends ConsumerWidget {
+  const _MediaFolderTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(ankiDroidMediaAccessProvider);
+    return async.when(
+      loading: () => const ListTile(
+        leading: Icon(Icons.image_outlined),
+        title: Text('Media folder'),
+        subtitle: Text('Checking…'),
+      ),
+      error: (e, _) => ListTile(
+        leading: const Icon(Icons.image_outlined),
+        title: const Text('Media folder'),
+        subtitle: Text('Error: $e'),
+      ),
+      data: (hasAccess) {
+        if (hasAccess) {
+          return ListTile(
+            leading: const Icon(Icons.image_outlined, color: Colors.green),
+            title: const Text('Media folder connected'),
+            subtitle: const Text(
+              'Card images and audio will render. Tap to pick a different folder.',
+            ),
+            trailing: IconButton(
+              icon: const Icon(Icons.delete_outline),
+              tooltip: 'Forget folder',
+              onPressed: () => _forget(context, ref),
+            ),
+            onTap: () => _pick(context, ref),
+          );
+        }
+        return ListTile(
+          leading: const Icon(Icons.image_outlined),
+          title: const Text('Connect media folder'),
+          subtitle: const Text(
+            'Pick your AnkiDroid folder so card images and audio can render. '
+            'AnkiBlock needs read access to /AnkiDroid (or /AnkiDroid/collection.media).',
+          ),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => _pick(context, ref),
+        );
+      },
+    );
+  }
+
+  Future<void> _pick(BuildContext context, WidgetRef ref) async {
+    final svc = ref.read(ankiDroidServiceProvider);
+    final ok = await svc.pickAnkiDroidFolder();
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          ok
+              ? 'Media folder connected.'
+              : 'Could not find collection.media inside that folder. '
+                  'Pick the AnkiDroid folder (or its collection.media subfolder).',
+        ),
+      ),
+    );
+    ref.invalidate(ankiDroidMediaAccessProvider);
+  }
+
+  Future<void> _forget(BuildContext context, WidgetRef ref) async {
+    await ref.read(ankiDroidServiceProvider).forgetMediaFolder();
+    if (!context.mounted) return;
+    ref.invalidate(ankiDroidMediaAccessProvider);
   }
 }
 

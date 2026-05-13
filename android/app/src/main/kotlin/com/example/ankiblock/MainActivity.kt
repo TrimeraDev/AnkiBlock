@@ -27,9 +27,11 @@ class MainActivity : FlutterActivity() {
 
     private val channelName = "com.ankiblock/permissions"
     private val ankiDroidChannelName = "com.ankiblock/ankidroid"
+    private val mediaChannelName = "com.ankiblock/ankidroid_media"
     private var methodChannel: MethodChannel? = null
     private var pendingGate: Map<String, String>? = null
     private var ankiDroidApi: AnkiDroidApi? = null
+    private var mediaBridge: AnkiMediaBridge? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -39,6 +41,7 @@ class MainActivity : FlutterActivity() {
         )
         methodChannel = ch
         registerAnkiDroidChannel(flutterEngine)
+        registerMediaChannel(flutterEngine)
         ch.setMethodCallHandler { call, result ->
             when (call.method) {
                 "hasUsageAccess" -> result.success(hasUsageAccess())
@@ -317,6 +320,63 @@ class MainActivity : FlutterActivity() {
             ?: false
         if (!handled) {
             super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        }
+    }
+
+    @Deprecated(
+        "Kept for the SAF folder-picker callback; FlutterActivity does not " +
+            "expose Activity Result APIs cleanly.",
+    )
+    @Suppress("DEPRECATION")
+    override fun onActivityResult(
+        requestCode: Int,
+        resultCode: Int,
+        data: Intent?,
+    ) {
+        val handled = mediaBridge?.onActivityResult(requestCode, resultCode, data)
+            ?: false
+        if (!handled) {
+            super.onActivityResult(requestCode, resultCode, data)
+        }
+    }
+
+    /**
+     * `com.ankiblock/ankidroid_media` MethodChannel — wraps [AnkiMediaBridge].
+     * Reads are dispatched to a worker thread because SAF lookups stat the
+     * filesystem.
+     */
+    private fun registerMediaChannel(flutterEngine: FlutterEngine) {
+        val bridge = AnkiMediaBridge(this)
+        mediaBridge = bridge
+        val channel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            mediaChannelName,
+        )
+        channel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "hasMediaAccess" -> result.success(bridge.hasMediaAccess())
+                "pickAnkiDroidFolder" -> bridge.pickAnkiDroidFolder(result)
+                "forgetFolder" -> {
+                    bridge.forgetFolder()
+                    result.success(true)
+                }
+                "getMediaBytes" -> {
+                    val filename = call.argument<String>("filename") ?: ""
+                    if (filename.isEmpty()) {
+                        result.success(null)
+                        return@setMethodCallHandler
+                    }
+                    Thread {
+                        val bytes = try {
+                            bridge.getMediaBytes(filename)
+                        } catch (_: Exception) {
+                            null
+                        }
+                        runOnUiThread { result.success(bytes) }
+                    }.start()
+                }
+                else -> result.notImplemented()
+            }
         }
     }
 

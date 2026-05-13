@@ -8,6 +8,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import '../../core/database/database.dart' as db;
 import '../../core/di/providers.dart';
 import '../../core/services/ankidroid_service.dart';
+import '../../core/services/card_html_processor.dart';
 
 /// Review session backed entirely by AnkiDroid's ContentProvider.
 ///
@@ -49,6 +50,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
   String? _error;
 
   late final WebViewController _webView;
+  late final CardHtmlProcessor _htmlProcessor;
 
   bool get _isUnlockMode =>
       widget.unlockPackage != null && widget.unlockPackage!.isNotEmpty;
@@ -56,9 +58,14 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
   @override
   void initState() {
     super.initState();
+    // Anki card templates frequently embed inline JS (MathJax bootstrap,
+    // cloze toggles, type-in-the-answer comparison helpers). The HTML is
+    // sourced from the user's own AnkiDroid collection — same trust level
+    // as AnkiDroid itself — so we enable JS unrestrictedly.
     _webView = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.disabled)
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(Colors.transparent);
+    _htmlProcessor = CardHtmlProcessor(ref.read(ankiDroidServiceProvider));
     _bootstrap();
   }
 
@@ -128,8 +135,13 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     _loadHtml(card.questionHtml);
   }
 
-  void _loadHtml(String body) {
-    _webView.loadHtmlString(_wrapHtml(body));
+  Future<void> _loadHtml(String body) async {
+    // Inline any AnkiDroid media references before handing the HTML to the
+    // WebView. If the media folder isn't connected, [process] is a no-op
+    // and we fall back to broken-image icons.
+    final processed = await _htmlProcessor.process(body);
+    if (!mounted) return;
+    _webView.loadHtmlString(_wrapHtml(processed));
   }
 
   /// Wraps AnkiDroid's pre-rendered fragment in a minimal document. Cards

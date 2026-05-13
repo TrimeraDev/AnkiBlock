@@ -43,3 +43,8 @@ android {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // SAF helper for the AnkiDroid media folder bridge (AnkiMediaBridge.kt).
+    implementation("androidx.documentfile:documentfile:1.0.1")
+}

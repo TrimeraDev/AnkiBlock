@@ -66,6 +66,13 @@ final ankiDroidDecksProvider =
   return ref.watch(ankiDroidServiceProvider).listDecks();
 });
 
+/// True when the user has granted SAF access to the AnkiDroid media folder
+/// so card images / audio can resolve. Invalidate after picking the folder
+/// or after revoking access.
+final ankiDroidMediaAccessProvider = FutureProvider<bool>((ref) async {
+  return ref.watch(ankiDroidServiceProvider).hasMediaAccess();
+});
+
 // Study scope ----------------------------------------------------------------
 
 final studyScopeServiceProvider = Provider<StudyScopeService>((ref) {

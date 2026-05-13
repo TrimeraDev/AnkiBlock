@@ -126,13 +126,29 @@ class _DeckList extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return ListView(
+    final body = ListView(
       children: [
         _ScopeHeader(scope: scope),
         const Divider(height: 1),
         for (final d in decks) _DeckRow(deck: d, scope: scope),
       ],
     );
+
+    // Single-deck mode uses radio buttons; wrap in a RadioGroup so the new
+    // Material API can manage selection without per-tile `groupValue`s.
+    if (scope.mode == StudyScopeMode.single) {
+      return RadioGroup<int>(
+        groupValue: scope.activeDeckId,
+        onChanged: (v) async {
+          final svc = ref.read(studyScopeServiceProvider);
+          await svc.setActiveDeck(v);
+          ref.invalidate(studyScopeProvider);
+          ref.invalidate(studyCountsProvider);
+        },
+        child: body,
+      );
+    }
+    return body;
   }
 }
 
@@ -236,18 +252,13 @@ class _DeckRow extends ConsumerWidget {
           },
         );
       case StudyScopeMode.single:
+        // [RadioGroup] is provided by the parent _DeckList in this mode,
+        // so the tile only needs its own value and the row chrome.
         return RadioListTile<int>(
           secondary: const Icon(Icons.style_outlined),
           value: deck.id,
-          groupValue: scope.activeDeckId,
           title: Text(deck.name),
           subtitle: Text(subtitle),
-          onChanged: (v) async {
-            final svc = ref.read(studyScopeServiceProvider);
-            await svc.setActiveDeck(v);
-            ref.invalidate(studyScopeProvider);
-            ref.invalidate(studyCountsProvider);
-          },
           selected: isActive,
         );
     }
