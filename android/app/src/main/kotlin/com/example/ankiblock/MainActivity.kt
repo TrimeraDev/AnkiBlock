@@ -375,6 +375,30 @@ class MainActivity : FlutterActivity() {
                         runOnUiThread { result.success(bytes) }
                     }.start()
                 }
+                "getMediaDebugInfo" -> {
+                    Thread {
+                        val info = try {
+                            bridge.getMediaDebugInfo()
+                        } catch (_: Exception) {
+                            emptyMap<String, Any?>()
+                        }
+                        runOnUiThread { result.success(info) }
+                    }.start()
+                }
+                "probeMediaFiles" -> {
+                    @Suppress("UNCHECKED_CAST")
+                    val names =
+                        (call.argument<List<*>>("filenames") ?: emptyList<Any?>())
+                            .mapNotNull { it as? String }
+                    Thread {
+                        val probes = try {
+                            bridge.probeMediaFiles(names)
+                        } catch (_: Exception) {
+                            emptyList<Map<String, Any?>>()
+                        }
+                        runOnUiThread { result.success(probes) }
+                    }.start()
+                }
                 else -> result.notImplemented()
             }
         }

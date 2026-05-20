@@ -182,8 +182,12 @@ class AppDatabase extends _$AppDatabase {
   Future<int> insertUnlockSession(UnlockSessionsCompanion session) =>
       into(unlockSessions).insert(session);
 
-  Future updateUnlockSession(UnlockSessionsCompanion session) =>
-      update(unlockSessions).write(session);
+  Future updateUnlockSession(
+    int sessionId,
+    UnlockSessionsCompanion changes,
+  ) =>
+      (update(unlockSessions)..where((s) => s.id.equals(sessionId)))
+          .write(changes);
 
   Future incrementCompletedCards(int sessionId) async {
     final session = await (select(unlockSessions)

@@ -1,4 +1,5 @@
 import 'package:drift/drift.dart' show Value;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -9,6 +10,7 @@ import '../../core/database/database.dart' as db;
 import '../../core/di/providers.dart';
 import '../../core/services/ankidroid_service.dart';
 import '../../core/services/card_html_processor.dart';
+import '../../core/theme/app_theme.dart';
 
 /// Review session backed entirely by AnkiDroid's ContentProvider.
 ///
@@ -44,6 +46,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
   bool _loading = true;
   bool _finished = false;
   bool _showingAnswer = false;
+  bool _htmlLoading = false;
   DateTime? _cardStartedAt;
   int? _unlockSessionId;
   int _completedThisSession = 0;
@@ -64,7 +67,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     // as AnkiDroid itself — so we enable JS unrestrictedly.
     _webView = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(Colors.transparent);
+      ..setBackgroundColor(AppTheme.surface);
     _htmlProcessor = CardHtmlProcessor(ref.read(ankiDroidServiceProvider));
     _bootstrap();
   }
@@ -132,41 +135,157 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     final card = _queue[_index];
     _cardStartedAt = DateTime.now();
     _showingAnswer = false;
-    _loadHtml(card.questionHtml);
+    _loadHtml(card.questionHtml, revealAnswer: false);
   }
 
-  Future<void> _loadHtml(String body) async {
+  /// HTML to show after "Show answer". Stacks front + back when Anki's answer
+  /// template doesn't already include the question, and surfaces a message when
+  /// AnkiDroid returns an empty back side.
+  String _revealedHtml(AnkiDroidCard card) {
+    final q = card.questionHtml.trim();
+    final a = card.answerHtml.trim();
+    if (a.isEmpty) {
+      if (q.isEmpty) {
+        return '<p>No card content returned from AnkiDroid.</p>';
+      }
+      return '$q<hr id="answer"><p><em>Answer was empty in AnkiDroid. '
+          'Try reviewing this card in AnkiDroid once to refresh its template.</em></p>';
+    }
+    if (q.isEmpty || _answerLikelyIncludesFront(q, a)) return a;
+    return '$q<hr id="answer">$a';
+  }
+
+  bool _answerLikelyIncludesFront(String question, String answer) {
+    final snippet = _plainTextSnippet(question, 48);
+    if (snippet.length < 8) return answer.length >= question.length;
+    return answer.contains(snippet);
+  }
+
+  String _plainTextSnippet(String html, int maxLen) {
+    final plain = html
+        .replaceAll(RegExp(r'<[^>]+>'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (plain.length <= maxLen) return plain;
+    return plain.substring(0, maxLen);
+  }
+
+  Future<void> _loadHtml(String body, {required bool revealAnswer}) async {
+    if (mounted) setState(() => _htmlLoading = true);
+    final card = _queue[_index];
     // Inline any AnkiDroid media references before handing the HTML to the
     // WebView. If the media folder isn't connected, [process] is a no-op
     // and we fall back to broken-image icons.
-    final processed = await _htmlProcessor.process(body);
+    final result = await _htmlProcessor.processWithReport(
+      body,
+      cardMediaFiles: card.mediaFiles,
+    );
+    if (kDebugMode && result.report.hasMissing && mounted) {
+      final names = CardHtmlProcessor.filenamesInHtml(body);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Missing media: ${result.report.missing.take(3).join(", ")}'
+            '${result.report.missing.length > 3 ? "…" : ""}. '
+            'Check AnkiDroid sync → Media folder.',
+          ),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+      assert(names.isNotEmpty || card.mediaFiles.isNotEmpty);
+    }
+    final processed = result.html;
     if (!mounted) return;
-    _webView.loadHtmlString(_wrapHtml(processed));
+    await _webView.loadHtmlString(_wrapHtml(processed, revealAnswer: revealAnswer));
+    if (!mounted) return;
+    // Many note types hide the back in CSS/JS until AnkiDroid's reviewer
+    // toggles them — we are not in that activity, so force visibility.
+    if (revealAnswer) {
+      await _webView.runJavaScript(_revealAnswerJs);
+    }
+    if (mounted) setState(() => _htmlLoading = false);
   }
 
-  /// Wraps AnkiDroid's pre-rendered fragment in a minimal document. Cards
-  /// can already reference styles from their note type, but we add a small
-  /// reset so things don't render with the WebView's default page styles.
-  String _wrapHtml(String body) {
+  /// Unhide answer regions that Anki templates keep `display:none` until tapped
+  /// inside AnkiDroid's own reviewer (type-in-the-answer, etc.).
+  static const _revealAnswerJs = '''
+(function() {
+  var ids = ['answer', 'ans', 'answers', 'back'];
+  for (var i = 0; i < ids.length; i++) {
+    var el = document.getElementById(ids[i]);
+    if (el) {
+      el.style.setProperty('display', 'block', 'important');
+      el.style.setProperty('visibility', 'visible', 'important');
+      el.hidden = false;
+      el.removeAttribute('hidden');
+    }
+  }
+  document.querySelectorAll('#answer, #ans, .answer').forEach(function(el) {
+    el.style.setProperty('display', 'block', 'important');
+    el.style.setProperty('visibility', 'visible', 'important');
+    el.hidden = false;
+  });
+})();
+''';
+
+  /// Wraps AnkiDroid's pre-rendered fragment in a minimal document.
+  ///
+  /// Note-type CSS from Anki often sets light grey text (or night-mode
+  /// colours on a white WebView). We override those so cards stay readable
+  /// inside AnkiBlock's light shell.
+  String _wrapHtml(String body, {required bool revealAnswer}) {
+    final revealCss = revealAnswer
+        ? '''
+  /* Back side is often hidden until AnkiDroid's reviewer reveals it. */
+  #answer, #ans, #answers, #back, .answer {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+'''
+        : '';
     return '''
 <!doctype html>
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="color-scheme" content="light">
 <style>
-  :root { color-scheme: light dark; }
   html, body {
-    margin: 0; padding: 16px;
+    margin: 0;
+    padding: 16px;
     font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
-    font-size: 18px; line-height: 1.5;
-    color: #1a1a1a; background: transparent;
+    font-size: 18px;
+    line-height: 1.5;
+    color: #1b1b1b !important;
+    background: #ffffff !important;
     word-wrap: break-word;
+    -webkit-text-fill-color: #1b1b1b !important;
   }
-  @media (prefers-color-scheme: dark) {
-    body { color: #eee; }
+  /* Anki wraps content in .card; templates often set a faint text colour. */
+  .card, .card * {
+    color: #1b1b1b !important;
+    background-color: transparent !important;
+    -webkit-text-fill-color: #1b1b1b !important;
+  }
+  /* Cloze deletions should stay visually distinct (beat .card *). */
+  .cloze, .card .cloze {
+    color: #1565c0 !important;
+    -webkit-text-fill-color: #1565c0 !important;
+    font-weight: 600;
+  }
+  a, a * {
+    color: #1565c0 !important;
+    -webkit-text-fill-color: #1565c0 !important;
   }
   img { max-width: 100%; height: auto; }
-  hr#answer { border: none; border-top: 1px solid #ccc; margin: 16px 0; }
+  audio, video { max-width: 100%; }
+  hr#answer {
+    border: none;
+    border-top: 1px solid #d6d2ca;
+    margin: 16px 0;
+  }
+$revealCss
 </style>
 </head>
 <body>$body</body>
@@ -177,7 +296,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
   Future<void> _showAnswer() async {
     final card = _queue[_index];
     setState(() => _showingAnswer = true);
-    _loadHtml(card.answerHtml);
+    await _loadHtml(_revealedHtml(card), revealAnswer: true);
   }
 
   Future<void> _answer(AnkiDroidEase ease) async {
@@ -233,9 +352,9 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
       final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
       await database.incrementUnlocksEarned(today);
       await database.updateUnlockSession(
-        db.UnlockSessionsCompanion(
-          id: Value(_unlockSessionId!),
-          status: const Value(db.UnlockStatus.completed),
+        _unlockSessionId!,
+        const db.UnlockSessionsCompanion(
+          status: Value(db.UnlockStatus.completed),
         ),
       );
 
@@ -282,7 +401,15 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
       ),
       body: Column(
         children: [
-          Expanded(child: WebViewWidget(controller: _webView)),
+          Expanded(
+            child: Stack(
+              children: [
+                WebViewWidget(controller: _webView),
+                if (_htmlLoading)
+                  const Center(child: CircularProgressIndicator()),
+              ],
+            ),
+          ),
           const Divider(height: 1),
           SafeArea(
             top: false,

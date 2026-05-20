@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -208,8 +209,9 @@ class _MediaFolderTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final async = ref.watch(ankiDroidMediaAccessProvider);
-    return async.when(
+    final accessAsync = ref.watch(ankiDroidMediaAccessProvider);
+    final debugAsync = ref.watch(ankiDroidMediaDebugProvider);
+    return accessAsync.when(
       loading: () => const ListTile(
         leading: Icon(Icons.image_outlined),
         title: Text('Media folder'),
@@ -221,30 +223,65 @@ class _MediaFolderTile extends ConsumerWidget {
         subtitle: Text('Error: $e'),
       ),
       data: (hasAccess) {
-        if (hasAccess) {
-          return ListTile(
-            leading: const Icon(Icons.image_outlined, color: Colors.green),
-            title: const Text('Media folder connected'),
-            subtitle: const Text(
-              'Card images and audio will render. Tap to pick a different folder.',
+        final debug = debugAsync.valueOrNull;
+        final subtitle = debug?.hint ??
+            (hasAccess
+                ? 'Card images and audio will render.'
+                : 'Pick the AnkiDroid folder — we find media files automatically.');
+
+        final needsScoped = debug?.needsScopedAnkiDroidFolder ?? false;
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (needsScoped)
+              Material(
+                color: Colors.orange.shade50,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: Text(
+                    'Wrong folder: legacy /AnkiDroid only has the index DB '
+                    '(collection.media.ad.db2), not image files. Re-connect and '
+                    'pick: ${debug!.recommendedPath}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.orange.shade900,
+                    ),
+                  ),
+                ),
+              ),
+            ListTile(
+              leading: Icon(
+                Icons.image_outlined,
+                color: hasAccess ? Colors.green : null,
+              ),
+              title: Text(
+                hasAccess ? 'Media folder connected' : 'Connect media folder',
+              ),
+              subtitle: Text(subtitle),
+              trailing: hasAccess
+                  ? IconButton(
+                      icon: const Icon(Icons.delete_outline),
+                      tooltip: 'Forget folder',
+                      onPressed: () => _forget(context, ref),
+                    )
+                  : const Icon(Icons.chevron_right),
+              onTap: () => _pick(context, ref),
             ),
-            trailing: IconButton(
-              icon: const Icon(Icons.delete_outline),
-              tooltip: 'Forget folder',
-              onPressed: () => _forget(context, ref),
-            ),
-            onTap: () => _pick(context, ref),
-          );
-        }
-        return ListTile(
-          leading: const Icon(Icons.image_outlined),
-          title: const Text('Connect media folder'),
-          subtitle: const Text(
-            'Pick your AnkiDroid folder so card images and audio can render. '
-            'AnkiBlock needs read access to /AnkiDroid (or /AnkiDroid/collection.media).',
-          ),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => _pick(context, ref),
+            if (debug != null) _MediaDebugPanel(debug: debug),
+            if (!hasAccess)
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: Text(
+                  'Select the AnkiDroid folder. You may see collection.media.db2 or '
+                  'collection.media.ad.db2 — that is the media index (a database), not '
+                  'the images themselves. Images are in the collection.media folder; '
+                  'AnkiBlock opens both automatically.\n\n'
+                  'Path: Android → data → com.ichi2.anki → files → AnkiDroid',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ),
+          ],
         );
       },
     );
@@ -258,19 +295,161 @@ class _MediaFolderTile extends ConsumerWidget {
       SnackBar(
         content: Text(
           ok
-              ? 'Media folder connected.'
-              : 'Could not find collection.media inside that folder. '
-                  'Pick the AnkiDroid folder (or its collection.media subfolder).',
+              ? 'Connected. AnkiBlock found your media folder automatically.'
+              : 'No collection.media folder with images. If you picked top-level '
+                  'AnkiDroid, use Android/data/com.ichi2.anki/files/AnkiDroid instead.',
         ),
       ),
     );
     ref.invalidate(ankiDroidMediaAccessProvider);
+    ref.invalidate(ankiDroidMediaDebugProvider);
+    logMediaDebugToConsole(await svc.getMediaDebugInfo());
   }
 
   Future<void> _forget(BuildContext context, WidgetRef ref) async {
     await ref.read(ankiDroidServiceProvider).forgetMediaFolder();
     if (!context.mounted) return;
     ref.invalidate(ankiDroidMediaAccessProvider);
+    ref.invalidate(ankiDroidMediaDebugProvider);
+  }
+}
+
+class _MediaDebugPanel extends StatefulWidget {
+  final AnkiMediaDebugInfo debug;
+  const _MediaDebugPanel({required this.debug});
+
+  @override
+  State<_MediaDebugPanel> createState() => _MediaDebugPanelState();
+}
+
+class _MediaDebugPanelState extends State<_MediaDebugPanel> {
+  bool _listingExpanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final debug = widget.debug;
+    final samples = debug.sampleFiles;
+    final listing = debug.folderListing;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (debug.needsScopedAnkiDroidFolder)
+            Text(
+              'Issue: legacy /AnkiDroid (index only, no images here)',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Colors.orange.shade800,
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+          Text(debug.hint, style: Theme.of(context).textTheme.bodySmall),
+          if (debug.pickedFolderName.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              'You selected: ${debug.pickedFolderName}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+          if (debug.mediaDirName.isNotEmpty)
+            Text(
+              'Auto-found: ${debug.mediaDirName}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          if (debug.mediaDbName.isNotEmpty)
+            Text(
+              'Index: ${debug.mediaDbName} '
+              '(${debug.mediaIndexEntries} filenames)',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          if (samples.isNotEmpty)
+            Text(
+              'Sample files: ${samples.join(", ")}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          if (listing.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            InkWell(
+              onTap: () => setState(() => _listingExpanded = !_listingExpanded),
+              child: Row(
+                children: [
+                  Icon(
+                    _listingExpanded
+                        ? Icons.expand_less
+                        : Icons.expand_more,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Folder contents (${listing.length} lines)',
+                    style: Theme.of(context).textTheme.labelMedium,
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.copy, size: 18),
+                    tooltip: 'Copy listing',
+                    onPressed: () {
+                      Clipboard.setData(
+                        ClipboardData(text: listing.join('\n')),
+                      );
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Folder listing copied.'),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+            if (_listingExpanded)
+              Container(
+                width: double.infinity,
+                constraints: const BoxConstraints(maxHeight: 220),
+                margin: const EdgeInsets.only(top: 4),
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: SingleChildScrollView(
+                  child: SelectableText(
+                    listing.join('\n'),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          fontFamily: 'monospace',
+                          fontSize: 10,
+                          height: 1.35,
+                        ),
+                  ),
+                ),
+              ),
+            Text(
+              'Also in logcat: adb logcat -s AnkiBlock.media',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    fontSize: 10,
+                    color: Colors.grey,
+                  ),
+            ),
+          ],
+          if (debug.mediaDbSchema.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Index DB schema:',
+              style: Theme.of(context).textTheme.labelSmall,
+            ),
+            SelectableText(
+              debug.mediaDbSchema.join('\n'),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    fontFamily: 'monospace',
+                    fontSize: 10,
+                  ),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 }
 

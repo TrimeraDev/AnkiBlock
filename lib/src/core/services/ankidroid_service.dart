@@ -1,3 +1,4 @@
+import 'dart:developer' as developer;
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -63,6 +64,9 @@ class AnkiDroidCard {
   /// Pre-rendered answer HTML (back side, includes the front).
   final String answerHtml;
 
+  /// Media filenames referenced by this card (from ReviewInfo.MEDIA_FILES).
+  final List<String> mediaFiles;
+
   const AnkiDroidCard({
     required this.noteId,
     required this.cardOrd,
@@ -70,6 +74,7 @@ class AnkiDroidCard {
     required this.nextReviewTimes,
     required this.questionHtml,
     required this.answerHtml,
+    this.mediaFiles = const [],
   });
 
   factory AnkiDroidCard.fromMap(Map<dynamic, dynamic> m) => AnkiDroidCard(
@@ -80,6 +85,8 @@ class AnkiDroidCard {
             (m['nextReviewTimes'] as List?)?.cast<String>() ?? const [],
         questionHtml: (m['question'] as String?) ?? '',
         answerHtml: (m['answer'] as String?) ?? '',
+        mediaFiles:
+            (m['mediaFiles'] as List?)?.cast<String>() ?? const [],
       );
 }
 
@@ -365,12 +372,147 @@ class AnkiDroidService {
     }
   }
 
+  /// Debug snapshot: SAF tree URI, resolved `collection.media`, sample files.
+  Future<AnkiMediaDebugInfo> getMediaDebugInfo() async {
+    if (!_isSupportedPlatform) {
+      return const AnkiMediaDebugInfo(
+        hasAccess: false,
+        persistedPermission: false,
+        hint:
+            'Media access is only available on Android. Connect AnkiDroid first.',
+      );
+    }
+    try {
+      final m = await _mediaChannel.invokeMethod<Map<Object?, Object?>>(
+        'getMediaDebugInfo',
+      );
+      return AnkiMediaDebugInfo.fromMap(m ?? {});
+    } catch (_) {
+      return const AnkiMediaDebugInfo(
+        hasAccess: false,
+        persistedPermission: false,
+        hint: 'Could not read media debug info.',
+      );
+    }
+  }
+
+  /// Checks whether each [filenames] entry exists under `collection.media`.
+  Future<List<AnkiMediaProbe>> probeMediaFiles(List<String> filenames) async {
+    if (!_isSupportedPlatform || filenames.isEmpty) return const [];
+    try {
+      final r = await _mediaChannel.invokeMethod<List<Object?>>(
+        'probeMediaFiles',
+        {'filenames': filenames},
+      );
+      if (r == null) return const [];
+      return r
+          .whereType<Map>()
+          .map((e) => AnkiMediaProbe.fromMap(Map<Object?, Object?>.from(e)))
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
   Exception _mapException(PlatformException e) {
     if (e.code == 'UNAVAILABLE' || e.code == 'ANKIDROID_NOT_INSTALLED') {
       return AnkiDroidUnavailable(e.message ?? e.code);
     }
     return e;
   }
+}
+
+/// SAF media-folder status for debugging and the settings screen.
+class AnkiMediaDebugInfo {
+  final bool hasAccess;
+  final bool persistedPermission;
+  final String pickedFolderName;
+  final String treeUri;
+  final String mediaDirName;
+  final String mediaDirUri;
+  final String mediaDbName;
+  final int mediaIndexEntries;
+  final List<String> sampleFiles;
+
+  /// Lines from a walk of the granted SAF tree (also in logcat: AnkiBlock.media).
+  final List<String> folderListing;
+  final List<String> mediaDbSchema;
+
+  /// e.g. legacy_public_folder, ok, index_without_media_folder
+  final String issue;
+  final String recommendedPath;
+  final String hint;
+
+  const AnkiMediaDebugInfo({
+    required this.hasAccess,
+    required this.persistedPermission,
+    this.pickedFolderName = '',
+    this.treeUri = '',
+    this.mediaDirName = '',
+    this.mediaDirUri = '',
+    this.mediaDbName = '',
+    this.mediaIndexEntries = 0,
+    this.sampleFiles = const [],
+    this.folderListing = const [],
+    this.mediaDbSchema = const [],
+    this.issue = '',
+    this.recommendedPath = '',
+    this.hint = '',
+  });
+
+  bool get needsScopedAnkiDroidFolder => issue == 'legacy_public_folder';
+
+  factory AnkiMediaDebugInfo.fromMap(Map<Object?, Object?> m) =>
+      AnkiMediaDebugInfo(
+        hasAccess: m['hasAccess'] == true,
+        persistedPermission: m['persistedPermission'] == true,
+        pickedFolderName: m['pickedFolderName'] as String? ?? '',
+        treeUri: m['treeUri'] as String? ?? '',
+        mediaDirName: m['mediaDirName'] as String? ?? '',
+        mediaDirUri: m['mediaDirUri'] as String? ?? '',
+        mediaDbName: m['mediaDbName'] as String? ?? '',
+        mediaIndexEntries: (m['mediaIndexEntries'] as num?)?.toInt() ?? 0,
+        sampleFiles: (m['sampleFiles'] as List?)?.cast<String>() ?? const [],
+        folderListing: (m['folderListing'] as List?)?.cast<String>() ?? const [],
+        mediaDbSchema: (m['mediaDbSchema'] as List?)?.cast<String>() ?? const [],
+        issue: m['issue'] as String? ?? '',
+        recommendedPath: m['recommendedPath'] as String? ?? '',
+        hint: m['hint'] as String? ?? '',
+      );
+}
+
+/// Logs [info.folderListing] (Kotlin also logs the same tag on Android).
+void logMediaDebugToConsole(AnkiMediaDebugInfo info) {
+  developer.log('─── folder listing (${info.folderListing.length} lines) ───',
+      name: 'AnkiBlock.media');
+  for (final line in info.folderListing) {
+    developer.log(line, name: 'AnkiBlock.media');
+  }
+  developer.log('hint: ${info.hint}', name: 'AnkiBlock.media');
+}
+
+class AnkiMediaProbe {
+  final String filename;
+  final String normalized;
+  final String diskName;
+  final bool found;
+  final int bytes;
+
+  const AnkiMediaProbe({
+    required this.filename,
+    required this.normalized,
+    this.diskName = '',
+    required this.found,
+    required this.bytes,
+  });
+
+  factory AnkiMediaProbe.fromMap(Map<Object?, Object?> m) => AnkiMediaProbe(
+        filename: m['filename'] as String? ?? '',
+        normalized: m['normalized'] as String? ?? '',
+        diskName: m['diskName'] as String? ?? '',
+        found: m['found'] == true,
+        bytes: (m['bytes'] as num?)?.toInt() ?? 0,
+      );
 }
 
 class AnkiDroidStatus {

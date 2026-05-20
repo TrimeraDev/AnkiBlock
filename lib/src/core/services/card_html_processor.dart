@@ -1,7 +1,26 @@
 import 'dart:convert';
-import 'dart:typed_data';
+import 'dart:developer' as developer;
+
+import 'package:flutter/foundation.dart';
 
 import 'ankidroid_service.dart';
+
+/// Result of inlining media into card HTML — useful for debug logging.
+class MediaProcessResult {
+  final List<String> referencedInHtml;
+  final List<String> fromAnkiDroid;
+  final List<String> resolved;
+  final List<String> missing;
+
+  const MediaProcessResult({
+    this.referencedInHtml = const [],
+    this.fromAnkiDroid = const [],
+    this.resolved = const [],
+    this.missing = const [],
+  });
+
+  bool get hasMissing => missing.isNotEmpty;
+}
 
 /// Pre-processes Anki-rendered HTML so it can be displayed offline inside a
 /// WebView without needing a custom resource loader.
@@ -11,13 +30,8 @@ import 'ankidroid_service.dart';
 /// file up in the user's AnkiDroid media folder via [AnkiDroidService] and
 /// rewrites the `src` to a `data:…;base64,…` URI.
 ///
-/// Anything else — absolute URLs, `data:` URIs, `file://`, `https://` — is
-/// left alone.
-///
-/// We deliberately don't try to parse HTML "properly". Anki templates can be
-/// arbitrarily messy and the cost of bringing in an HTML parser dependency
-/// dwarfs the value. A small regex over `src=` is faster, predictable, and
-/// covers the 99% case.
+/// Also tries filenames from AnkiDroid's [AnkiDroidCard.mediaFiles] when a
+/// direct lookup fails (disk name may differ from the name in HTML).
 class CardHtmlProcessor {
   final AnkiDroidService service;
 
@@ -29,32 +43,138 @@ class CardHtmlProcessor {
   CardHtmlProcessor(this.service);
 
   /// Matches `src="foo.jpg"` and `src='foo.jpg'` (single- and double-quoted).
-  /// Captures the quote in group 1 and the value in group 2. We do NOT
-  /// support unquoted `src=foo.jpg` — Anki always emits quotes.
   static final RegExp _srcPattern =
       RegExp(r'''src=(["'])([^"']+)\1''', caseSensitive: false);
 
-  /// Process [html], returning a new string with media references inlined.
-  /// If [hasMediaAccess] was never granted, returns [html] unchanged so the
-  /// WebView shows broken-image icons rather than blocking on missing
-  /// permissions.
-  Future<String> process(String html) async {
-    final matches = _srcPattern.allMatches(html).toList();
-    if (matches.isEmpty) return html;
-
-    // Resolve all references in parallel — DocumentFile lookups are
-    // independent and Kotlin runs each on its own worker thread anyway.
-    final filenames = matches
+  /// Filenames referenced by `src=` in card HTML (bare names only).
+  static List<String> filenamesInHtml(String html) {
+    return _srcPattern
+        .allMatches(html)
         .map((m) => m.group(2)!)
         .where(_needsResolving)
         .toSet()
         .toList();
-    if (filenames.isEmpty) return html;
+  }
 
-    await Future.wait(filenames.map(_resolve));
+  /// Process [html], returning a new string with media references inlined.
+  /// Pass [cardMediaFiles] from AnkiDroid's schedule row when available.
+  Future<String> process(
+    String html, {
+    List<String> cardMediaFiles = const [],
+  }) async {
+    final result = await processWithReport(
+      html,
+      cardMediaFiles: cardMediaFiles,
+    );
+    return result.html;
+  }
 
-    // Walk the matches in reverse and patch the string. Going in reverse
-    // means earlier match offsets stay valid as we splice.
+  Future<({String html, MediaProcessResult report})> processWithReport(
+    String html, {
+    List<String> cardMediaFiles = const [],
+  }) async {
+    final inHtml = filenamesInHtml(html);
+    final fromAnki = cardMediaFiles
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty && _needsResolving(s))
+        .toSet()
+        .toList();
+
+    final toResolve = {...inHtml, ...fromAnki}.toList();
+    if (toResolve.isEmpty) {
+      return (html: html, report: MediaProcessResult(referencedInHtml: inHtml));
+    }
+
+    final hasAccess = await service.hasMediaAccess();
+    if (!hasAccess) {
+      _logMedia(
+        'No media folder access — ${inHtml.length} src= in HTML, '
+        '${fromAnki.length} from AnkiDroid media_files. '
+        'Connect folder in Settings → AnkiDroid sync.',
+        inHtml,
+        fromAnki,
+      );
+      return (
+        html: html,
+        report: MediaProcessResult(
+          referencedInHtml: inHtml,
+          fromAnkiDroid: fromAnki,
+          missing: toResolve,
+        ),
+      );
+    }
+
+    final resolved = <String>[];
+    final missing = <String>[];
+
+    await Future.wait(
+      toResolve.map((name) async {
+        final ok = await _resolve(name, fallbackNames: fromAnki);
+        if (ok) {
+          resolved.add(name);
+        } else {
+          missing.add(name);
+        }
+      }),
+    );
+
+    if (missing.isNotEmpty || kDebugMode) {
+      _logMedia(
+        'Media: ${resolved.length} resolved, ${missing.length} missing '
+        '(html=${inHtml.length}, anki=${fromAnki.length})',
+        inHtml,
+        fromAnki,
+        missing: missing,
+      );
+      if (missing.isNotEmpty && kDebugMode) {
+        final probes = await service.probeMediaFiles(missing);
+        for (final p in probes) {
+          developer.log(
+            '  probe ${p.filename} → disk=${p.diskName} found=${p.found} '
+            'bytes=${p.bytes}',
+            name: 'AnkiBlock.media',
+          );
+        }
+      }
+    }
+
+    final patched = _patchHtml(html);
+    return (
+      html: patched,
+      report: MediaProcessResult(
+        referencedInHtml: inHtml,
+        fromAnkiDroid: fromAnki,
+        resolved: resolved,
+        missing: missing,
+      ),
+    );
+  }
+
+  void _logMedia(
+    String summary,
+    List<String> inHtml,
+    List<String> fromAnki, {
+    List<String> missing = const [],
+  }) {
+    developer.log(summary, name: 'AnkiBlock.media');
+    if (inHtml.isNotEmpty) {
+      developer.log('  html src: ${inHtml.join(", ")}', name: 'AnkiBlock.media');
+    }
+    if (fromAnki.isNotEmpty) {
+      developer.log(
+        '  anki media_files: ${fromAnki.join(", ")}',
+        name: 'AnkiBlock.media',
+      );
+    }
+    if (missing.isNotEmpty) {
+      developer.log('  missing: ${missing.join(", ")}', name: 'AnkiBlock.media');
+    }
+  }
+
+  String _patchHtml(String html) {
+    final matches = _srcPattern.allMatches(html).toList();
+    if (matches.isEmpty) return html;
+
     final buf = StringBuffer();
     var cursor = 0;
     for (final m in matches) {
@@ -62,7 +182,7 @@ class CardHtmlProcessor {
       final value = m.group(2)!;
       if (!_needsResolving(value)) continue;
       final dataUri = _cache[value];
-      if (dataUri == null) continue; // not found — leave the original src
+      if (dataUri == null) continue;
       buf.write(html.substring(cursor, m.start));
       buf.write('src=$quote$dataUri$quote');
       cursor = m.end;
@@ -71,24 +191,41 @@ class CardHtmlProcessor {
     return buf.toString();
   }
 
-  bool _needsResolving(String value) {
+  Future<bool> _resolve(
+    String filename, {
+    List<String> fallbackNames = const [],
+  }) async {
+    if (_cache.containsKey(filename)) return true;
+
+    var bytes = await service.getMediaBytes(filename);
+    if (bytes != null && bytes.isNotEmpty) {
+      _cache[filename] = _toDataUri(filename, bytes);
+      return true;
+    }
+
+    // HTML may reference a logical name while the file on disk uses another
+    // name listed in ReviewInfo.media_files.
+    for (final alt in fallbackNames) {
+      if (alt == filename || _cache.containsKey(alt)) continue;
+      bytes = await service.getMediaBytes(alt);
+      if (bytes != null && bytes.isNotEmpty) {
+        _cache[filename] = _toDataUri(filename, bytes);
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  static bool _needsResolving(String value) {
     if (value.isEmpty) return false;
     if (value.startsWith('data:')) return false;
     if (value.startsWith('http://') || value.startsWith('https://')) {
       return false;
     }
     if (value.startsWith('file://')) return false;
-    // Anki references are always bare filenames; if it looks like a path
-    // (contains a slash), it's probably a template asset we don't own.
     if (value.contains('/')) return false;
     return true;
-  }
-
-  Future<void> _resolve(String filename) async {
-    if (_cache.containsKey(filename)) return;
-    final bytes = await service.getMediaBytes(filename);
-    if (bytes == null || bytes.isEmpty) return;
-    _cache[filename] = _toDataUri(filename, bytes);
   }
 
   static String _toDataUri(String filename, Uint8List bytes) {

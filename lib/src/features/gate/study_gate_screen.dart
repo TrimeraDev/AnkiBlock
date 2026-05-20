@@ -128,11 +128,13 @@ class _QueueRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+    return Wrap(
+      alignment: WrapAlignment.center,
+      spacing: 8,
+      runSpacing: 8,
       children: [
         _Chip(value: counts.newCount, label: 'New'),
-        _Chip(value: counts.learnCount, label: 'Learning'),
+        _Chip(value: counts.learnCount, label: 'Learn'),
         _Chip(value: counts.reviewCount, label: 'Review'),
       ],
     );
@@ -147,7 +149,7 @@ class _Chip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(16),
@@ -161,8 +163,11 @@ class _Chip extends StatelessWidget {
                   fontWeight: FontWeight.bold,
                 ),
           ),
-          const SizedBox(width: 6),
-          Text(label, style: Theme.of(context).textTheme.bodyMedium),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
         ],
       ),
     );

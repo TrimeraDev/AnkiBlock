@@ -38,18 +38,23 @@ class AnkiDroidApi(private val activity: Activity) {
         val DECKS_URI: Uri = Uri.withAppendedPath(AUTHORITY_URI, "decks")
         val SCHEDULE_URI: Uri = Uri.withAppendedPath(AUTHORITY_URI, "schedule")
 
-        // Deck columns
+        // Deck columns (names from FlashCardsContract.Deck — constant is DECK_COUNTS
+        // but the SQL column is literally "deck_count").
         private const val DECK_ID = "deck_id"
         private const val DECK_NAME = "deck_name"
-        private const val DECK_COUNTS = "deck_counts"
+        private const val DECK_COUNT = "deck_count"
 
         // Schedule / ReviewInfo columns
         private const val NOTE_ID = "note_id"
-        private const val CARD_ORD = "card_ord"
+        private const val CARD_ORD = "ord"
         private const val BUTTON_COUNT = "button_count"
         private const val NEXT_REVIEW_TIMES = "next_review_times"
+        private const val MEDIA_FILES = "media_files"
         private const val QUESTION = "question"
+        private const val QUESTION_SIMPLE = "question_simple"
         private const val ANSWER = "answer"
+        private const val ANSWER_SIMPLE = "answer_simple"
+        private const val ANSWER_PURE = "answer_pure"
         private const val ANSWER_EASE = "answer_ease"
         private const val TIME_TAKEN = "time_taken"
     }
@@ -157,7 +162,7 @@ class AnkiDroidApi(private val activity: Activity) {
         cr.query(DECKS_URI, null, null, null, null)?.use { c ->
             val idIdx = c.getColumnIndex(DECK_ID)
             val nameIdx = c.getColumnIndex(DECK_NAME)
-            val countsIdx = c.getColumnIndex(DECK_COUNTS)
+            val countsIdx = columnIndex(c, DECK_COUNT, "deck_counts")
             while (c.moveToNext()) {
                 val id = if (idIdx >= 0) c.getLong(idIdx) else continue
                 val name = if (nameIdx >= 0) c.getString(nameIdx) ?: "" else ""
@@ -206,12 +211,11 @@ class AnkiDroidApi(private val activity: Activity) {
         val args = arrayOf(limit.toString(), deckId.toString())
         val out = mutableListOf<Map<String, Any?>>()
         cr.query(SCHEDULE_URI, null, selection, args, null)?.use { c ->
-            val noteIdIdx = c.getColumnIndex(NOTE_ID)
-            val cardOrdIdx = c.getColumnIndex(CARD_ORD)
-            val buttonCountIdx = c.getColumnIndex(BUTTON_COUNT)
-            val nextTimesIdx = c.getColumnIndex(NEXT_REVIEW_TIMES)
-            val questionIdx = c.getColumnIndex(QUESTION)
-            val answerIdx = c.getColumnIndex(ANSWER)
+            val noteIdIdx = columnIndex(c, NOTE_ID)
+            val cardOrdIdx = columnIndex(c, CARD_ORD, "card_ord")
+            val buttonCountIdx = columnIndex(c, BUTTON_COUNT)
+            val nextTimesIdx = columnIndex(c, NEXT_REVIEW_TIMES)
+            val mediaIdx = columnIndex(c, MEDIA_FILES)
             while (c.moveToNext()) {
                 val noteId = if (noteIdIdx >= 0) c.getLong(noteIdIdx) else continue
                 val cardOrd = if (cardOrdIdx >= 0) c.getInt(cardOrdIdx) else 0
@@ -219,21 +223,70 @@ class AnkiDroidApi(private val activity: Activity) {
                     if (buttonCountIdx >= 0) c.getInt(buttonCountIdx) else 4
                 val nextTimesRaw =
                     if (nextTimesIdx >= 0) c.getString(nextTimesIdx) else null
-                val question = if (questionIdx >= 0) c.getString(questionIdx) else null
-                val answer = if (answerIdx >= 0) c.getString(answerIdx) else null
+                val mediaRaw =
+                    if (mediaIdx >= 0) c.getString(mediaIdx) else null
+                val (question, answer) = fetchRenderedCard(noteId, cardOrd)
                 out.add(
                     mapOf(
                         "noteId" to noteId,
                         "cardOrd" to cardOrd,
                         "buttonCount" to buttonCount,
                         "nextReviewTimes" to parseStringArray(nextTimesRaw),
-                        "question" to (question ?: ""),
-                        "answer" to (answer ?: ""),
+                        "mediaFiles" to parseStringArray(mediaRaw),
+                        "question" to question,
+                        "answer" to answer,
                     ),
                 )
             }
         }
         return out
+    }
+
+    /**
+     * ReviewInfo rows do not include rendered HTML — only ids and scheduling
+     * metadata. Pull question/answer from the NoteCard URI documented in
+     * FlashCardsContract: `notes/<noteId>/cards/<ord>`.
+     */
+    private fun fetchRenderedCard(noteId: Long, cardOrd: Int): Pair<String, String> {
+        val noteUri = Uri.withAppendedPath(
+            Uri.withAppendedPath(AUTHORITY_URI, "notes"),
+            noteId.toString(),
+        )
+        val cardsUri = Uri.withAppendedPath(noteUri, "cards")
+        val cardUri = Uri.withAppendedPath(cardsUri, cardOrd.toString())
+        val cr = activity.contentResolver
+        cr.query(cardUri, null, null, null, null)?.use { c ->
+            if (!c.moveToFirst()) return Pair("", "")
+            val q = firstNonBlank(c, QUESTION, QUESTION_SIMPLE) ?: ""
+            val a = firstNonBlank(c, ANSWER, ANSWER_PURE, ANSWER_SIMPLE) ?: ""
+            return Pair(q, a)
+        }
+        return Pair("", "")
+    }
+
+    /** First non-blank string among [names] columns, in priority order. */
+    private fun firstNonBlank(
+        cursor: android.database.Cursor,
+        vararg names: String,
+    ): String? {
+        for (name in names) {
+            val idx = cursor.getColumnIndex(name)
+            if (idx < 0) continue
+            val value = cursor.getString(idx)
+            if (!value.isNullOrBlank()) return value
+        }
+        return null
+    }
+
+    private fun columnIndex(
+        cursor: android.database.Cursor,
+        vararg names: String,
+    ): Int {
+        for (name in names) {
+            val idx = cursor.getColumnIndex(name)
+            if (idx >= 0) return idx
+        }
+        return -1
     }
 
     private fun parseStringArray(raw: String?): List<String> {

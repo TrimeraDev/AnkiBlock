@@ -73,6 +73,12 @@ final ankiDroidMediaAccessProvider = FutureProvider<bool>((ref) async {
   return ref.watch(ankiDroidServiceProvider).hasMediaAccess();
 });
 
+/// SAF media-folder debug snapshot (tree URI, sample files, hints).
+final ankiDroidMediaDebugProvider =
+    FutureProvider<AnkiMediaDebugInfo>((ref) async {
+  return ref.watch(ankiDroidServiceProvider).getMediaDebugInfo();
+});
+
 // Study scope ----------------------------------------------------------------
 
 final studyScopeServiceProvider = Provider<StudyScopeService>((ref) {
