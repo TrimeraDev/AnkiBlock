@@ -368,12 +368,24 @@ $revealCss
     setState(() => _finished = true);
   }
 
+  bool get _blockUnlockExit => _isUnlockMode && !_finished;
+
+  Widget _wrapUnlockBarrier(Widget child) {
+    if (!_blockUnlockExit) return child;
+    return PopScope(canPop: false, child: child);
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Studying')),
-        body: const Center(child: CircularProgressIndicator()),
+      return _wrapUnlockBarrier(
+        Scaffold(
+          appBar: AppBar(
+            automaticallyImplyLeading: !_blockUnlockExit,
+            title: const Text('Studying'),
+          ),
+          body: const Center(child: CircularProgressIndicator()),
+        ),
       );
     }
     if (_error != null) {
@@ -395,46 +407,49 @@ $revealCss
     }
 
     final card = _queue[_index];
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Card ${_index + 1} / ${_queue.length}'),
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: Stack(
-              children: [
-                WebViewWidget(controller: _webView),
-                if (_htmlLoading)
-                  const Center(child: CircularProgressIndicator()),
-              ],
+    return _wrapUnlockBarrier(
+      Scaffold(
+        appBar: AppBar(
+          automaticallyImplyLeading: !_blockUnlockExit,
+          title: Text('Card ${_index + 1} / ${_queue.length}'),
+        ),
+        body: Column(
+          children: [
+            Expanded(
+              child: Stack(
+                children: [
+                  WebViewWidget(controller: _webView),
+                  if (_htmlLoading)
+                    const Center(child: CircularProgressIndicator()),
+                ],
+              ),
             ),
-          ),
-          const Divider(height: 1),
-          SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: _showingAnswer
-                  ? _AnswerButtons(
-                      buttonCount: card.buttonCount,
-                      previews: card.nextReviewTimes,
-                      onAnswer: _answer,
-                    )
-                  : SizedBox(
-                      width: double.infinity,
-                      child: FilledButton(
-                        onPressed: _showAnswer,
-                        style: FilledButton.styleFrom(
-                          padding:
-                              const EdgeInsets.symmetric(vertical: 16),
+            const Divider(height: 1),
+            SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: _showingAnswer
+                    ? _AnswerButtons(
+                        buttonCount: card.buttonCount,
+                        previews: card.nextReviewTimes,
+                        onAnswer: _answer,
+                      )
+                    : SizedBox(
+                        width: double.infinity,
+                        child: FilledButton(
+                          onPressed: _showAnswer,
+                          style: FilledButton.styleFrom(
+                            padding:
+                                const EdgeInsets.symmetric(vertical: 16),
+                          ),
+                          child: const Text('Show answer'),
                         ),
-                        child: const Text('Show answer'),
                       ),
-                    ),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
