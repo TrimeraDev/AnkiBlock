@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 
 import 'core/di/providers.dart';
 import 'core/navigation/router.dart';
@@ -19,6 +20,7 @@ class AnkiBlockApp extends ConsumerStatefulWidget {
 class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
     with WidgetsBindingObserver {
   StreamSubscription<GateRequest>? _gateSub;
+  StreamSubscription<int>? _delegatedUnlockSub;
 
   @override
   void initState() {
@@ -37,6 +39,7 @@ class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
   Future<void> _bootstrap() async {
     final svc = ref.read(appsServiceProvider);
     _gateSub = svc.gateRequests.listen(_handleGate);
+    _delegatedUnlockSub = svc.delegatedUnlocks.listen(_handleDelegatedUnlock);
 
     // Re-sync blocked list and start monitor on every cold start
     final db = ref.read(databaseProvider);
@@ -53,6 +56,10 @@ class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
     // If launched from a gate intent, consume and route
     final pending = await svc.consumePendingGate();
     if (pending != null) _handleGate(pending);
+
+    // Warm the installed-apps cache in the background so the blocking screen
+    // opens instantly on repeat visits.
+    unawaited(ref.read(installedAppsProvider.future));
   }
 
   void _handleGate(GateRequest req) {
@@ -63,10 +70,19 @@ class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
     });
   }
 
+  Future<void> _handleDelegatedUnlock(int cardsCompleted) async {
+    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    final db = ref.read(databaseProvider);
+    await db.incrementCardsReviewedBy(today, cardsCompleted);
+    await db.incrementUnlocksEarned(today);
+    ref.invalidate(dailyStatsProvider(today));
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _gateSub?.cancel();
+    _delegatedUnlockSub?.cancel();
     super.dispose();
   }
 

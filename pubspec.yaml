@@ -30,12 +30,8 @@ dependencies:
   # Platform
   permission_handler: ^11.3.1
 
-  # Card rendering (AnkiDroid hands us pre-rendered HTML)
-  webview_flutter: ^4.10.0
-
   # Utils
   intl: ^0.19.0
-  flutter_svg: ^2.2.4
 
 dev_dependencies:
   flutter_test:

@@ -24,6 +24,7 @@ class _BlockingScreenState extends ConsumerState<BlockingScreen> {
     final appsAsync = ref.watch(installedAppsProvider);
     final blockedAsync = ref.watch(blockedAppsProvider);
     final loadingApps = appsAsync.isLoading;
+    final refreshingApps = appsAsync.isLoading && appsAsync.hasValue;
 
     return Scaffold(
       appBar: AppBar(
@@ -44,7 +45,7 @@ class _BlockingScreenState extends ConsumerState<BlockingScreen> {
             tooltip: 'Refresh',
             onPressed: loadingApps
                 ? null
-                : () => ref.invalidate(installedAppsProvider),
+                : () => ref.read(installedAppsProvider.notifier).refresh(),
           ),
           PopupMenuButton<_SortMode>(
             icon: const Icon(Icons.sort),
@@ -58,31 +59,47 @@ class _BlockingScreenState extends ConsumerState<BlockingScreen> {
         ],
       ),
       body: appsAsync.when(
-        // Default is true: refresh/invalidate keeps showing old data with no
-        // loading affordance while native work runs (often 1–2s). Show the
-        // loading UI whenever we are waiting on the future.
-        skipLoadingOnRefresh: false,
+        // Cached list stays visible while a background refresh runs.
+        skipLoadingOnRefresh: true,
         loading: () => const _BlockingLoadingBody(),
         error: (e, _) => _ErrorView(
             error: e,
             onRetry: () {
-              ref.invalidate(installedAppsProvider);
+              ref.read(installedAppsProvider.notifier).refresh();
             }),
         data: (apps) {
-          final blockedSet = (blockedAsync.valueOrNull ?? const <BlockedApp>[])
+          final blockedRecords = (blockedAsync.valueOrNull ?? const <BlockedApp>[])
               .where((b) => b.isBlocked)
-              .map((b) => b.packageName)
-              .toSet();
+              .toList();
+          final blockedSet =
+              blockedRecords.map((b) => b.packageName).toSet();
 
-          final filtered = apps.where((a) {
-            if (_hideSystem && a.isSystem) return false;
+          bool matchesQuery(InstalledApp a) {
             if (_query.isEmpty) return true;
             final q = _query.toLowerCase();
             return a.appName.toLowerCase().contains(q) ||
                 a.packageName.toLowerCase().contains(q);
+          }
+
+          final filtered = apps.where((a) {
+            if (_hideSystem && a.isSystem) return false;
+            return matchesQuery(a);
           }).toList();
 
-          filtered.sort((a, b) {
+          final installedPackages = apps.map((a) => a.packageName).toSet();
+          final blockedNotInstalled = blockedRecords
+              .where((b) => !installedPackages.contains(b.packageName))
+              .map(
+                (b) => InstalledApp(
+                  packageName: b.packageName,
+                  appName: b.displayName,
+                  isSystem: false,
+                ),
+              )
+              .where(matchesQuery)
+              .toList();
+
+          int compareApps(InstalledApp a, InstalledApp b) {
             switch (_sort) {
               case _SortMode.usage:
                 final c = b.usage.compareTo(a.usage);
@@ -95,7 +112,33 @@ class _BlockingScreenState extends ConsumerState<BlockingScreen> {
                     .toLowerCase()
                     .compareTo(b.appName.toLowerCase());
             }
-          });
+          }
+
+          final blockedApps = [
+            ...filtered.where((a) => blockedSet.contains(a.packageName)),
+            ...blockedNotInstalled,
+          ]..sort(compareApps);
+
+          final otherApps = filtered
+              .where((a) => !blockedSet.contains(a.packageName))
+              .toList()
+            ..sort(compareApps);
+
+          final listEntries = <_BlockingListEntry>[];
+          if (blockedApps.isNotEmpty) {
+            listEntries.add(_BlockingListEntry.header(
+              'Blocked (${blockedApps.length})',
+            ));
+            for (final app in blockedApps) {
+              listEntries.add(_BlockingListEntry.app(app));
+            }
+            if (otherApps.isNotEmpty && _query.isEmpty) {
+              listEntries.add(const _BlockingListEntry.header('All apps'));
+            }
+          }
+          for (final app in otherApps) {
+            listEntries.add(_BlockingListEntry.app(app));
+          }
 
           final suggested = filtered
               .where((a) => kSuggestedBlockPackages.contains(a.packageName))
@@ -103,6 +146,8 @@ class _BlockingScreenState extends ConsumerState<BlockingScreen> {
 
           return Column(
             children: [
+              if (refreshingApps)
+                const LinearProgressIndicator(minHeight: 2),
               _SearchBar(
                 onChanged: (v) => setState(() => _query = v),
                 hideSystem: _hideSystem,
@@ -116,15 +161,20 @@ class _BlockingScreenState extends ConsumerState<BlockingScreen> {
                 ),
               Expanded(
                 child: ListView.separated(
-                  itemCount: filtered.length,
+                  itemCount: listEntries.length,
                   separatorBuilder: (_, __) => const Divider(height: 0),
                   itemBuilder: (context, i) {
-                    final app = filtered[i];
-                    final isBlocked = blockedSet.contains(app.packageName);
-                    return _AppTile(
-                      app: app,
-                      isBlocked: isBlocked,
-                      onChanged: (v) => _toggleBlock(app, v),
+                    final entry = listEntries[i];
+                    return entry.map(
+                      header: (title) => _SectionHeader(title: title),
+                      app: (app) {
+                        final isBlocked = blockedSet.contains(app.packageName);
+                        return _AppTile(
+                          app: app,
+                          isBlocked: isBlocked,
+                          onChanged: (v) => _toggleBlock(app, v),
+                        );
+                      },
                     );
                   },
                 ),
@@ -186,6 +236,64 @@ class _BlockingScreenState extends ConsumerState<BlockingScreen> {
 }
 
 enum _SortMode { usage, name }
+
+sealed class _BlockingListEntry {
+  const _BlockingListEntry();
+
+  const factory _BlockingListEntry.header(String title) =
+      _BlockingListHeaderEntry;
+  const factory _BlockingListEntry.app(InstalledApp app) =
+      _BlockingListAppEntry;
+
+  T map<T>({
+    required T Function(String title) header,
+    required T Function(InstalledApp app) app,
+  });
+}
+
+final class _BlockingListHeaderEntry extends _BlockingListEntry {
+  const _BlockingListHeaderEntry(this.title);
+  final String title;
+
+  @override
+  T map<T>({
+    required T Function(String title) header,
+    required T Function(InstalledApp app) app,
+  }) =>
+      header(title);
+}
+
+final class _BlockingListAppEntry extends _BlockingListEntry {
+  const _BlockingListAppEntry(this.app);
+  final InstalledApp app;
+
+  @override
+  T map<T>({
+    required T Function(String title) header,
+    required T Function(InstalledApp app) app,
+  }) =>
+      app(this.app);
+}
+
+class _SectionHeader extends StatelessWidget {
+  final String title;
+
+  const _SectionHeader({required this.title});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+      child: Text(
+        title,
+        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              color: Theme.of(context).colorScheme.primary,
+              fontWeight: FontWeight.w600,
+            ),
+      ),
+    );
+  }
+}
 
 /// Full-screen loading state while native code gathers installed apps,
 /// icons, and usage stats (can take a second or two on a cold start).

@@ -5,7 +5,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../features/today/today_screen.dart';
 import '../../features/decks/decks_screen.dart';
 import '../../features/blocking/blocking_screen.dart';
-import '../../features/review/review_screen.dart';
 import '../../features/gate/study_gate_screen.dart';
 import '../../features/onboarding/onboarding_screen.dart';
 import '../../features/settings/ankidroid_screen.dart';
@@ -54,17 +53,6 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/ankidroid',
         builder: (context, state) => const AnkiDroidScreen(),
-      ),
-      GoRoute(
-        path: '/review',
-        builder: (context, state) {
-          final extra = state.extra as Map<String, dynamic>?;
-          return ReviewScreen(
-            unlockPackage: extra?['unlockPackage'] as String?,
-            unlockAppName: extra?['unlockAppName'] as String?,
-            cardLimit: extra?['cardLimit'] as int? ?? 0,
-          );
-        },
       ),
       GoRoute(
         path: '/gate',

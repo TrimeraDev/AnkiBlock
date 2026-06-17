@@ -9,7 +9,6 @@ import 'package:path_provider/path_provider.dart';
 import 'src/app.dart';
 import 'src/core/database/database.dart';
 import 'src/core/di/providers.dart';
-import 'src/core/services/app_blocker_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -30,19 +29,12 @@ void main() async {
     ),
   );
 
-  // Initialize database
   final db = await _initializeDatabase();
-
-  // Initialize app blocker service
-  final blockerService = AppBlockerService();
-  await blockerService.initialize();
-  blockerService.setDatabase(db);
 
   runApp(
     ProviderScope(
       overrides: [
         databaseProvider.overrideWithValue(db),
-        appBlockerServiceProvider.overrideWithValue(blockerService),
       ],
       child: const AnkiBlockApp(),
     ),

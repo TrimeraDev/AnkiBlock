@@ -5,9 +5,6 @@ import 'package:drift/native.dart';
 
 part 'database.g.dart';
 
-/// State of an unlock window earned by a study session.
-enum UnlockStatus { active, completed, expired, cancelled }
-
 // ============ TABLES ============
 //
 // AnkiBlock no longer stores cards, notes, decks, models, media, or review
@@ -15,8 +12,7 @@ enum UnlockStatus { active, completed, expired, cancelled }
 // `FlashCardsContract` ContentProvider).
 //
 // What remains is purely AnkiBlock-specific: the app-blocker, the unlock
-// rule that governs the study gate, in-flight unlock sessions, and a small
-// per-day stats ledger used by the unlock counter / Today screen.
+// rule that governs the study gate, and a small per-day stats ledger.
 
 @DataClassName('BlockedApp')
 class BlockedApps extends Table {
@@ -37,28 +33,11 @@ class BlockRules extends Table {
   IntColumn get unlockDurationMinutes =>
       integer().withDefault(const Constant(10))();
   BoolColumn get isEnabled => boolean().withDefault(const Constant(true))();
-  IntColumn get dailyNewCardsLimit =>
-      integer().withDefault(const Constant(20))();
-  IntColumn get dailyReviewsLimit =>
-      integer().withDefault(const Constant(200))();
   IntColumn get updatedAt =>
       integer().withDefault(Constant(DateTime.now().millisecondsSinceEpoch))();
 
   @override
   Set<Column> get primaryKey => {id};
-}
-
-@DataClassName('UnlockSession')
-class UnlockSessions extends Table {
-  IntColumn get id => integer().autoIncrement()();
-  TextColumn get packageName => text()();
-  IntColumn get startedAt =>
-      integer().withDefault(Constant(DateTime.now().millisecondsSinceEpoch))();
-  IntColumn get expiresAt => integer()();
-  IntColumn get requiredCards => integer()();
-  IntColumn get completedCards => integer().withDefault(const Constant(0))();
-  IntColumn get status =>
-      intEnum<UnlockStatus>().withDefault(const Constant(0))(); // 0 = active
 }
 
 @DataClassName('DailyStat')
@@ -72,13 +51,29 @@ class DailyStats extends Table {
   Set<Column> get primaryKey => {date};
 }
 
+/// Snapshot of installed apps from the last successful native scan. Used so the
+/// blocking screen can render immediately while a fresh scan runs.
+@DataClassName('CachedInstalledApp')
+class InstalledAppsCache extends Table {
+  TextColumn get packageName => text()();
+  TextColumn get displayName => text()();
+  BoolColumn get isSystem => boolean().withDefault(const Constant(false))();
+  BlobColumn get icon => blob().nullable()();
+  IntColumn get usageMs => integer().withDefault(const Constant(0))();
+  IntColumn get cachedAt =>
+      integer().withDefault(Constant(DateTime.now().millisecondsSinceEpoch))();
+
+  @override
+  Set<Column> get primaryKey => {packageName};
+}
+
 // ============ DATABASE ============
 
 @DriftDatabase(tables: [
   BlockedApps,
   BlockRules,
-  UnlockSessions,
   DailyStats,
+  InstalledAppsCache,
 ])
 class AppDatabase extends _$AppDatabase {
   AppDatabase._internal(super.e);
@@ -89,7 +84,7 @@ class AppDatabase extends _$AppDatabase {
   }
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -101,10 +96,32 @@ class AppDatabase extends _$AppDatabase {
           );
         },
         onUpgrade: (m, from, to) async {
+          if (from < 5) {
+            await m.database
+                .customStatement('DROP TABLE IF EXISTS unlock_sessions');
+            await m.database.customStatement('''
+              CREATE TABLE IF NOT EXISTS block_rules_new (
+                id INTEGER NOT NULL PRIMARY KEY,
+                cards_required INTEGER NOT NULL DEFAULT 3,
+                unlock_duration_minutes INTEGER NOT NULL DEFAULT 10,
+                is_enabled INTEGER NOT NULL DEFAULT 1 CHECK (is_enabled IN (0, 1)),
+                updated_at INTEGER NOT NULL DEFAULT 0
+              )
+            ''');
+            await m.database.customStatement('''
+              INSERT OR IGNORE INTO block_rules_new
+                (id, cards_required, unlock_duration_minutes, is_enabled, updated_at)
+              SELECT id, cards_required, unlock_duration_minutes, is_enabled, updated_at
+              FROM block_rules
+            ''');
+            await m.database.customStatement('DROP TABLE block_rules');
+            await m.database
+                .customStatement('ALTER TABLE block_rules_new RENAME TO block_rules');
+          }
+          if (from < 4) {
+            await m.createTable(installedAppsCache);
+          }
           if (from < 3) {
-            // Pre-AnkiDroid schema. Drop every legacy table; AnkiDroid is now
-            // the source of truth for cards/notes/decks/etc. The blocker
-            // tables below are recreated only if they don't already exist.
             for (final t in const [
               'cards',
               'notes',
@@ -148,6 +165,22 @@ class AppDatabase extends _$AppDatabase {
         .go();
   }
 
+  // ============ INSTALLED APPS CACHE ============
+
+  Future<List<CachedInstalledApp>> getCachedInstalledApps() =>
+      select(installedAppsCache).get();
+
+  Future<void> replaceInstalledAppsCache(
+    List<InstalledAppsCacheCompanion> rows,
+  ) async {
+    await transaction(() async {
+      await delete(installedAppsCache).go();
+      if (rows.isNotEmpty) {
+        await batch((b) => b.insertAll(installedAppsCache, rows));
+      }
+    });
+  }
+
   // ============ BLOCK RULE QUERIES ============
 
   Stream<BlockRule?> watchBlockRule() =>
@@ -158,53 +191,6 @@ class AppDatabase extends _$AppDatabase {
 
   Future updateBlockRule(BlockRulesCompanion rule) =>
       update(blockRules).write(rule);
-
-  // ============ UNLOCK SESSION QUERIES ============
-
-  Stream<List<UnlockSession>> watchActiveSessions() => (select(unlockSessions)
-        ..where((s) => s.status.equals(UnlockStatus.active.index)))
-      .watch();
-
-  Future<UnlockSession?> getActiveSessionForPackage(String packageName) async {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final query = select(unlockSessions)
-      ..where((s) => s.packageName.equals(packageName))
-      ..where((s) => s.status
-          .isIn([UnlockStatus.active.index, UnlockStatus.completed.index]))
-      ..where((s) => s.expiresAt.isBiggerThanValue(now))
-      ..orderBy([
-        (s) => OrderingTerm(expression: s.startedAt, mode: OrderingMode.desc)
-      ])
-      ..limit(1);
-    return query.getSingleOrNull();
-  }
-
-  Future<int> insertUnlockSession(UnlockSessionsCompanion session) =>
-      into(unlockSessions).insert(session);
-
-  Future updateUnlockSession(
-    int sessionId,
-    UnlockSessionsCompanion changes,
-  ) =>
-      (update(unlockSessions)..where((s) => s.id.equals(sessionId)))
-          .write(changes);
-
-  Future incrementCompletedCards(int sessionId) async {
-    final session = await (select(unlockSessions)
-          ..where((s) => s.id.equals(sessionId)))
-        .getSingle();
-    await (update(unlockSessions)..where((s) => s.id.equals(sessionId))).write(
-        UnlockSessionsCompanion(
-            completedCards: Value(session.completedCards + 1)));
-  }
-
-  Future expireOldSessions(int now) async {
-    await (update(unlockSessions)
-          ..where((s) => s.status.equals(UnlockStatus.active.index))
-          ..where((s) => s.expiresAt.isSmallerOrEqualValue(now)))
-        .write(const UnlockSessionsCompanion(
-            status: Value(UnlockStatus.expired)));
-  }
 
   // ============ DAILY STATS QUERIES ============
 
@@ -219,17 +205,22 @@ class AppDatabase extends _$AppDatabase {
       into(dailyStats).insertOnConflictUpdate(stat);
 
   Future incrementCardsReviewed(String date) async {
+    await incrementCardsReviewedBy(date, 1);
+  }
+
+  Future incrementCardsReviewedBy(String date, int count) async {
+    if (count <= 0) return;
     final stat = await getDailyStat(date);
     if (stat == null) {
       await insertOrUpdateDailyStat(
         DailyStatsCompanion(
           date: Value(date),
-          cardsReviewed: const Value(1),
+          cardsReviewed: Value(count),
         ),
       );
     } else {
       await (update(dailyStats)..where((d) => d.date.equals(date))).write(
-          DailyStatsCompanion(cardsReviewed: Value(stat.cardsReviewed + 1)));
+          DailyStatsCompanion(cardsReviewed: Value(stat.cardsReviewed + count)));
     }
   }
 

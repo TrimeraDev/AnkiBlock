@@ -1,10 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../database/database.dart';
 import '../services/ankidroid_service.dart';
-import '../services/app_blocker_service.dart';
 import '../services/apps_service.dart';
-import '../services/audio_service.dart';
 import '../services/permission_service.dart';
 import '../services/study_scope_service.dart';
 
@@ -15,10 +15,6 @@ final databaseProvider = Provider<AppDatabase>((ref) {
 });
 
 // Services -------------------------------------------------------------------
-
-final appBlockerServiceProvider = Provider<AppBlockerService>((ref) {
-  throw UnimplementedError('AppBlockerService must be overridden in main.dart');
-});
 
 final permissionServiceProvider = Provider<PermissionService>((ref) {
   return PermissionService();
@@ -36,15 +32,55 @@ final appsServiceProvider = Provider<AppsService>((ref) {
   return AppsService();
 });
 
-final installedAppsProvider = FutureProvider<List<InstalledApp>>((ref) async {
-  return ref.read(appsServiceProvider).listAppsWithUsage();
-});
+final installedAppsProvider =
+    AsyncNotifierProvider<InstalledAppsNotifier, List<InstalledApp>>(
+  InstalledAppsNotifier.new,
+);
 
-final audioServiceProvider = Provider<AudioService>((ref) {
-  final svc = AudioService();
-  ref.onDispose(svc.dispose);
-  return svc;
-});
+class InstalledAppsNotifier extends AsyncNotifier<List<InstalledApp>> {
+  @override
+  Future<List<InstalledApp>> build() async {
+    ref.keepAlive();
+    final cached = await _loadFromCache();
+    if (cached.isNotEmpty) {
+      unawaited(refresh());
+      return cached;
+    }
+    return _fetchAndSave();
+  }
+
+  /// Re-scan installed apps from the OS. Keeps the previous list visible while
+  /// loading when we already have data.
+  Future<void> refresh() async {
+    if (state.hasValue) {
+      state = const AsyncValue<List<InstalledApp>>.loading()
+          .copyWithPrevious(state);
+    }
+    try {
+      final apps = await _fetchAndSave();
+      state = AsyncValue.data(apps);
+    } catch (e, st) {
+      state = state.hasValue
+          ? AsyncValue<List<InstalledApp>>.error(e, st).copyWithPrevious(state)
+          : AsyncValue.error(e, st);
+    }
+  }
+
+  Future<List<InstalledApp>> _loadFromCache() async {
+    final db = ref.read(databaseProvider);
+    final rows = await db.getCachedInstalledApps();
+    return rows.map((r) => r.toInstalledApp()).toList();
+  }
+
+  Future<List<InstalledApp>> _fetchAndSave() async {
+    final apps = await ref.read(appsServiceProvider).listAppsWithUsage();
+    final db = ref.read(databaseProvider);
+    await db.replaceInstalledAppsCache(
+      apps.map((a) => a.toCacheCompanion()).toList(),
+    );
+    return apps;
+  }
+}
 
 // AnkiDroid integration ------------------------------------------------------
 
@@ -64,19 +100,6 @@ final ankiDroidDecksProvider =
   final status = await ref.watch(ankiDroidStatusProvider.future);
   if (!status.isReady) return const [];
   return ref.watch(ankiDroidServiceProvider).listDecks();
-});
-
-/// True when the user has granted SAF access to the AnkiDroid media folder
-/// so card images / audio can resolve. Invalidate after picking the folder
-/// or after revoking access.
-final ankiDroidMediaAccessProvider = FutureProvider<bool>((ref) async {
-  return ref.watch(ankiDroidServiceProvider).hasMediaAccess();
-});
-
-/// SAF media-folder debug snapshot (tree URI, sample files, hints).
-final ankiDroidMediaDebugProvider =
-    FutureProvider<AnkiMediaDebugInfo>((ref) async {
-  return ref.watch(ankiDroidServiceProvider).getMediaDebugInfo();
 });
 
 // Study scope ----------------------------------------------------------------
@@ -118,14 +141,20 @@ final blockRuleProvider = StreamProvider<BlockRule?>((ref) {
   return db.watchBlockRule();
 });
 
-final activeSessionsProvider = StreamProvider<List<UnlockSession>>((ref) {
-  final db = ref.watch(databaseProvider);
-  return db.watchActiveSessions();
-});
-
 /// Live daily stats for a given YYYY-MM-DD date.
 final dailyStatsProvider =
     StreamProvider.family<DailyStat?, String>((ref, date) {
   final db = ref.watch(databaseProvider);
   return db.watchDailyStat(date);
+});
+
+/// Today's pickups and screen time across blocked apps (usage access required).
+final gateTodayUsageProvider =
+    FutureProvider.family<TodayBlockedUsage, String>((ref, focusPackage) async {
+  final blocked = await ref.watch(activeBlockedAppsProvider.future);
+  if (blocked.isEmpty) return TodayBlockedUsage.zero;
+  return ref.read(appsServiceProvider).getTodayBlockedUsage(
+        packages: blocked.map((b) => b.packageName).toList(),
+        focusPackage: focusPackage,
+      );
 });

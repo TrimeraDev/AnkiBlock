@@ -45,6 +45,6 @@ flutter {
 }
 
 dependencies {
-    // SAF helper for the AnkiDroid media folder bridge (AnkiMediaBridge.kt).
+    // Deck listing and ContentProvider access for due counts and delegated study.
     implementation("androidx.documentfile:documentfile:1.0.1")
 }

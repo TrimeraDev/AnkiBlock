@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../../core/database/database.dart' as db;
 import '../../core/di/providers.dart';
 import '../../core/services/ankidroid_service.dart';
+import '../../core/services/study_launcher.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/global_blocking_permission_banner.dart';
 
@@ -16,7 +17,6 @@ class TodayScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final activeSessionsAsync = ref.watch(activeSessionsProvider);
     final blockedAppsAsync = ref.watch(activeBlockedAppsProvider);
     final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
     final dailyStatsAsync = ref.watch(dailyStatsProvider(today));
@@ -52,7 +52,6 @@ class TodayScreen extends ConsumerWidget {
                     context,
                     dailyStatsAsync,
                     blockedAppsAsync,
-                    activeSessionsAsync,
                   ),
                   const SizedBox(height: 24),
                   _QueueSection(countsAsync: countsAsync),
@@ -92,11 +91,9 @@ class TodayScreen extends ConsumerWidget {
     BuildContext context,
     AsyncValue<db.DailyStat?> statsAsync,
     AsyncValue<List<db.BlockedApp>> blockedAppsAsync,
-    AsyncValue<List<db.UnlockSession>> sessionsAsync,
   ) {
     final stats = statsAsync.valueOrNull;
     final blockedCount = blockedAppsAsync.valueOrNull?.length ?? 0;
-    final activeUnlocks = sessionsAsync.valueOrNull?.length ?? 0;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -125,27 +122,12 @@ class TodayScreen extends ConsumerWidget {
           ],
         ),
         const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: _StatCard(
-                icon: Icons.block,
-                value: '$blockedCount',
-                label: 'Apps Blocked',
-                color: AppTheme.error,
-                onTap: () => context.push('/blocking'),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _StatCard(
-                icon: Icons.timer,
-                value: '$activeUnlocks',
-                label: 'Active Unlocks',
-                color: AppTheme.warning,
-              ),
-            ),
-          ],
+        _StatCard(
+          icon: Icons.block,
+          value: '$blockedCount',
+          label: 'Apps Blocked',
+          color: AppTheme.error,
+          onTap: () => context.push('/blocking'),
         ),
       ],
     );
@@ -235,13 +217,37 @@ class _QueueSection extends StatelessWidget {
   }
 }
 
-class _QuickActions extends StatelessWidget {
+class _QuickActions extends ConsumerStatefulWidget {
   final AsyncValue<AnkiDroidCounts> countsAsync;
   const _QuickActions({required this.countsAsync});
 
   @override
+  ConsumerState<_QuickActions> createState() => _QuickActionsState();
+}
+
+class _QuickActionsState extends ConsumerState<_QuickActions> {
+  bool _launching = false;
+
+  Future<void> _openInAnkiDroid() async {
+    if (_launching) return;
+    setState(() => _launching = true);
+    try {
+      final scope = await ref.read(studyScopeProvider.future);
+      final decks = await ref.read(ankiDroidDecksProvider.future);
+      final anki = ref.read(ankiDroidServiceProvider);
+      await openScopedAnkiDroidReviewer(
+        scope: scope,
+        decks: decks,
+        anki: anki,
+      );
+    } finally {
+      if (mounted) setState(() => _launching = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final counts = countsAsync.valueOrNull ?? AnkiDroidCounts.zero;
+    final counts = widget.countsAsync.valueOrNull ?? AnkiDroidCounts.zero;
     final hasCards = counts.studyable > 0;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -252,12 +258,20 @@ class _QuickActions extends StatelessWidget {
           children: [
             Expanded(
               child: ElevatedButton.icon(
-                onPressed: hasCards ? () => context.push('/review') : null,
-                icon: const Icon(Icons.school),
+                onPressed: hasCards && !_launching ? _openInAnkiDroid : null,
+                icon: _launching
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.open_in_new),
                 label: Text(
-                  hasCards
-                      ? 'Study Now (${counts.studyable})'
-                      : 'Nothing due',
+                  _launching
+                      ? 'Opening…'
+                      : hasCards
+                          ? 'Open in AnkiDroid (${counts.studyable})'
+                          : 'Nothing due',
                 ),
                 style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 16),

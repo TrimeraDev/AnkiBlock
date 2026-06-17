@@ -320,22 +320,6 @@ class $BlockRulesTable extends BlockRules
       defaultConstraints:
           GeneratedColumn.constraintIsAlways('CHECK ("is_enabled" IN (0, 1))'),
       defaultValue: const Constant(true));
-  static const VerificationMeta _dailyNewCardsLimitMeta =
-      const VerificationMeta('dailyNewCardsLimit');
-  @override
-  late final GeneratedColumn<int> dailyNewCardsLimit = GeneratedColumn<int>(
-      'daily_new_cards_limit', aliasedName, false,
-      type: DriftSqlType.int,
-      requiredDuringInsert: false,
-      defaultValue: const Constant(20));
-  static const VerificationMeta _dailyReviewsLimitMeta =
-      const VerificationMeta('dailyReviewsLimit');
-  @override
-  late final GeneratedColumn<int> dailyReviewsLimit = GeneratedColumn<int>(
-      'daily_reviews_limit', aliasedName, false,
-      type: DriftSqlType.int,
-      requiredDuringInsert: false,
-      defaultValue: const Constant(200));
   static const VerificationMeta _updatedAtMeta =
       const VerificationMeta('updatedAt');
   @override
@@ -345,15 +329,8 @@ class $BlockRulesTable extends BlockRules
       requiredDuringInsert: false,
       defaultValue: Constant(DateTime.now().millisecondsSinceEpoch));
   @override
-  List<GeneratedColumn> get $columns => [
-        id,
-        cardsRequired,
-        unlockDurationMinutes,
-        isEnabled,
-        dailyNewCardsLimit,
-        dailyReviewsLimit,
-        updatedAt
-      ];
+  List<GeneratedColumn> get $columns =>
+      [id, cardsRequired, unlockDurationMinutes, isEnabled, updatedAt];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -383,18 +360,6 @@ class $BlockRulesTable extends BlockRules
       context.handle(_isEnabledMeta,
           isEnabled.isAcceptableOrUnknown(data['is_enabled']!, _isEnabledMeta));
     }
-    if (data.containsKey('daily_new_cards_limit')) {
-      context.handle(
-          _dailyNewCardsLimitMeta,
-          dailyNewCardsLimit.isAcceptableOrUnknown(
-              data['daily_new_cards_limit']!, _dailyNewCardsLimitMeta));
-    }
-    if (data.containsKey('daily_reviews_limit')) {
-      context.handle(
-          _dailyReviewsLimitMeta,
-          dailyReviewsLimit.isAcceptableOrUnknown(
-              data['daily_reviews_limit']!, _dailyReviewsLimitMeta));
-    }
     if (data.containsKey('updated_at')) {
       context.handle(_updatedAtMeta,
           updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta));
@@ -416,10 +381,6 @@ class $BlockRulesTable extends BlockRules
           DriftSqlType.int, data['${effectivePrefix}unlock_duration_minutes'])!,
       isEnabled: attachedDatabase.typeMapping
           .read(DriftSqlType.bool, data['${effectivePrefix}is_enabled'])!,
-      dailyNewCardsLimit: attachedDatabase.typeMapping.read(
-          DriftSqlType.int, data['${effectivePrefix}daily_new_cards_limit'])!,
-      dailyReviewsLimit: attachedDatabase.typeMapping.read(
-          DriftSqlType.int, data['${effectivePrefix}daily_reviews_limit'])!,
       updatedAt: attachedDatabase.typeMapping
           .read(DriftSqlType.int, data['${effectivePrefix}updated_at'])!,
     );
@@ -436,16 +397,12 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
   final int cardsRequired;
   final int unlockDurationMinutes;
   final bool isEnabled;
-  final int dailyNewCardsLimit;
-  final int dailyReviewsLimit;
   final int updatedAt;
   const BlockRule(
       {required this.id,
       required this.cardsRequired,
       required this.unlockDurationMinutes,
       required this.isEnabled,
-      required this.dailyNewCardsLimit,
-      required this.dailyReviewsLimit,
       required this.updatedAt});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -454,8 +411,6 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
     map['cards_required'] = Variable<int>(cardsRequired);
     map['unlock_duration_minutes'] = Variable<int>(unlockDurationMinutes);
     map['is_enabled'] = Variable<bool>(isEnabled);
-    map['daily_new_cards_limit'] = Variable<int>(dailyNewCardsLimit);
-    map['daily_reviews_limit'] = Variable<int>(dailyReviewsLimit);
     map['updated_at'] = Variable<int>(updatedAt);
     return map;
   }
@@ -466,8 +421,6 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
       cardsRequired: Value(cardsRequired),
       unlockDurationMinutes: Value(unlockDurationMinutes),
       isEnabled: Value(isEnabled),
-      dailyNewCardsLimit: Value(dailyNewCardsLimit),
-      dailyReviewsLimit: Value(dailyReviewsLimit),
       updatedAt: Value(updatedAt),
     );
   }
@@ -481,8 +434,6 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
       unlockDurationMinutes:
           serializer.fromJson<int>(json['unlockDurationMinutes']),
       isEnabled: serializer.fromJson<bool>(json['isEnabled']),
-      dailyNewCardsLimit: serializer.fromJson<int>(json['dailyNewCardsLimit']),
-      dailyReviewsLimit: serializer.fromJson<int>(json['dailyReviewsLimit']),
       updatedAt: serializer.fromJson<int>(json['updatedAt']),
     );
   }
@@ -494,8 +445,6 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
       'cardsRequired': serializer.toJson<int>(cardsRequired),
       'unlockDurationMinutes': serializer.toJson<int>(unlockDurationMinutes),
       'isEnabled': serializer.toJson<bool>(isEnabled),
-      'dailyNewCardsLimit': serializer.toJson<int>(dailyNewCardsLimit),
-      'dailyReviewsLimit': serializer.toJson<int>(dailyReviewsLimit),
       'updatedAt': serializer.toJson<int>(updatedAt),
     };
   }
@@ -505,8 +454,6 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
           int? cardsRequired,
           int? unlockDurationMinutes,
           bool? isEnabled,
-          int? dailyNewCardsLimit,
-          int? dailyReviewsLimit,
           int? updatedAt}) =>
       BlockRule(
         id: id ?? this.id,
@@ -514,8 +461,6 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
         unlockDurationMinutes:
             unlockDurationMinutes ?? this.unlockDurationMinutes,
         isEnabled: isEnabled ?? this.isEnabled,
-        dailyNewCardsLimit: dailyNewCardsLimit ?? this.dailyNewCardsLimit,
-        dailyReviewsLimit: dailyReviewsLimit ?? this.dailyReviewsLimit,
         updatedAt: updatedAt ?? this.updatedAt,
       );
   BlockRule copyWithCompanion(BlockRulesCompanion data) {
@@ -528,12 +473,6 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
           ? data.unlockDurationMinutes.value
           : this.unlockDurationMinutes,
       isEnabled: data.isEnabled.present ? data.isEnabled.value : this.isEnabled,
-      dailyNewCardsLimit: data.dailyNewCardsLimit.present
-          ? data.dailyNewCardsLimit.value
-          : this.dailyNewCardsLimit,
-      dailyReviewsLimit: data.dailyReviewsLimit.present
-          ? data.dailyReviewsLimit.value
-          : this.dailyReviewsLimit,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
   }
@@ -545,16 +484,14 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
           ..write('cardsRequired: $cardsRequired, ')
           ..write('unlockDurationMinutes: $unlockDurationMinutes, ')
           ..write('isEnabled: $isEnabled, ')
-          ..write('dailyNewCardsLimit: $dailyNewCardsLimit, ')
-          ..write('dailyReviewsLimit: $dailyReviewsLimit, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, cardsRequired, unlockDurationMinutes,
-      isEnabled, dailyNewCardsLimit, dailyReviewsLimit, updatedAt);
+  int get hashCode => Object.hash(
+      id, cardsRequired, unlockDurationMinutes, isEnabled, updatedAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -563,8 +500,6 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
           other.cardsRequired == this.cardsRequired &&
           other.unlockDurationMinutes == this.unlockDurationMinutes &&
           other.isEnabled == this.isEnabled &&
-          other.dailyNewCardsLimit == this.dailyNewCardsLimit &&
-          other.dailyReviewsLimit == this.dailyReviewsLimit &&
           other.updatedAt == this.updatedAt);
 }
 
@@ -573,16 +508,12 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
   final Value<int> cardsRequired;
   final Value<int> unlockDurationMinutes;
   final Value<bool> isEnabled;
-  final Value<int> dailyNewCardsLimit;
-  final Value<int> dailyReviewsLimit;
   final Value<int> updatedAt;
   const BlockRulesCompanion({
     this.id = const Value.absent(),
     this.cardsRequired = const Value.absent(),
     this.unlockDurationMinutes = const Value.absent(),
     this.isEnabled = const Value.absent(),
-    this.dailyNewCardsLimit = const Value.absent(),
-    this.dailyReviewsLimit = const Value.absent(),
     this.updatedAt = const Value.absent(),
   });
   BlockRulesCompanion.insert({
@@ -590,8 +521,6 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
     this.cardsRequired = const Value.absent(),
     this.unlockDurationMinutes = const Value.absent(),
     this.isEnabled = const Value.absent(),
-    this.dailyNewCardsLimit = const Value.absent(),
-    this.dailyReviewsLimit = const Value.absent(),
     this.updatedAt = const Value.absent(),
   });
   static Insertable<BlockRule> custom({
@@ -599,8 +528,6 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
     Expression<int>? cardsRequired,
     Expression<int>? unlockDurationMinutes,
     Expression<bool>? isEnabled,
-    Expression<int>? dailyNewCardsLimit,
-    Expression<int>? dailyReviewsLimit,
     Expression<int>? updatedAt,
   }) {
     return RawValuesInsertable({
@@ -609,9 +536,6 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
       if (unlockDurationMinutes != null)
         'unlock_duration_minutes': unlockDurationMinutes,
       if (isEnabled != null) 'is_enabled': isEnabled,
-      if (dailyNewCardsLimit != null)
-        'daily_new_cards_limit': dailyNewCardsLimit,
-      if (dailyReviewsLimit != null) 'daily_reviews_limit': dailyReviewsLimit,
       if (updatedAt != null) 'updated_at': updatedAt,
     });
   }
@@ -621,8 +545,6 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
       Value<int>? cardsRequired,
       Value<int>? unlockDurationMinutes,
       Value<bool>? isEnabled,
-      Value<int>? dailyNewCardsLimit,
-      Value<int>? dailyReviewsLimit,
       Value<int>? updatedAt}) {
     return BlockRulesCompanion(
       id: id ?? this.id,
@@ -630,8 +552,6 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
       unlockDurationMinutes:
           unlockDurationMinutes ?? this.unlockDurationMinutes,
       isEnabled: isEnabled ?? this.isEnabled,
-      dailyNewCardsLimit: dailyNewCardsLimit ?? this.dailyNewCardsLimit,
-      dailyReviewsLimit: dailyReviewsLimit ?? this.dailyReviewsLimit,
       updatedAt: updatedAt ?? this.updatedAt,
     );
   }
@@ -652,12 +572,6 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
     if (isEnabled.present) {
       map['is_enabled'] = Variable<bool>(isEnabled.value);
     }
-    if (dailyNewCardsLimit.present) {
-      map['daily_new_cards_limit'] = Variable<int>(dailyNewCardsLimit.value);
-    }
-    if (dailyReviewsLimit.present) {
-      map['daily_reviews_limit'] = Variable<int>(dailyReviewsLimit.value);
-    }
     if (updatedAt.present) {
       map['updated_at'] = Variable<int>(updatedAt.value);
     }
@@ -671,405 +585,7 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
           ..write('cardsRequired: $cardsRequired, ')
           ..write('unlockDurationMinutes: $unlockDurationMinutes, ')
           ..write('isEnabled: $isEnabled, ')
-          ..write('dailyNewCardsLimit: $dailyNewCardsLimit, ')
-          ..write('dailyReviewsLimit: $dailyReviewsLimit, ')
           ..write('updatedAt: $updatedAt')
-          ..write(')'))
-        .toString();
-  }
-}
-
-class $UnlockSessionsTable extends UnlockSessions
-    with TableInfo<$UnlockSessionsTable, UnlockSession> {
-  @override
-  final GeneratedDatabase attachedDatabase;
-  final String? _alias;
-  $UnlockSessionsTable(this.attachedDatabase, [this._alias]);
-  static const VerificationMeta _idMeta = const VerificationMeta('id');
-  @override
-  late final GeneratedColumn<int> id = GeneratedColumn<int>(
-      'id', aliasedName, false,
-      hasAutoIncrement: true,
-      type: DriftSqlType.int,
-      requiredDuringInsert: false,
-      defaultConstraints:
-          GeneratedColumn.constraintIsAlways('PRIMARY KEY AUTOINCREMENT'));
-  static const VerificationMeta _packageNameMeta =
-      const VerificationMeta('packageName');
-  @override
-  late final GeneratedColumn<String> packageName = GeneratedColumn<String>(
-      'package_name', aliasedName, false,
-      type: DriftSqlType.string, requiredDuringInsert: true);
-  static const VerificationMeta _startedAtMeta =
-      const VerificationMeta('startedAt');
-  @override
-  late final GeneratedColumn<int> startedAt = GeneratedColumn<int>(
-      'started_at', aliasedName, false,
-      type: DriftSqlType.int,
-      requiredDuringInsert: false,
-      defaultValue: Constant(DateTime.now().millisecondsSinceEpoch));
-  static const VerificationMeta _expiresAtMeta =
-      const VerificationMeta('expiresAt');
-  @override
-  late final GeneratedColumn<int> expiresAt = GeneratedColumn<int>(
-      'expires_at', aliasedName, false,
-      type: DriftSqlType.int, requiredDuringInsert: true);
-  static const VerificationMeta _requiredCardsMeta =
-      const VerificationMeta('requiredCards');
-  @override
-  late final GeneratedColumn<int> requiredCards = GeneratedColumn<int>(
-      'required_cards', aliasedName, false,
-      type: DriftSqlType.int, requiredDuringInsert: true);
-  static const VerificationMeta _completedCardsMeta =
-      const VerificationMeta('completedCards');
-  @override
-  late final GeneratedColumn<int> completedCards = GeneratedColumn<int>(
-      'completed_cards', aliasedName, false,
-      type: DriftSqlType.int,
-      requiredDuringInsert: false,
-      defaultValue: const Constant(0));
-  static const VerificationMeta _statusMeta = const VerificationMeta('status');
-  @override
-  late final GeneratedColumnWithTypeConverter<UnlockStatus, int> status =
-      GeneratedColumn<int>('status', aliasedName, false,
-              type: DriftSqlType.int,
-              requiredDuringInsert: false,
-              defaultValue: const Constant(0))
-          .withConverter<UnlockStatus>($UnlockSessionsTable.$converterstatus);
-  @override
-  List<GeneratedColumn> get $columns => [
-        id,
-        packageName,
-        startedAt,
-        expiresAt,
-        requiredCards,
-        completedCards,
-        status
-      ];
-  @override
-  String get aliasedName => _alias ?? actualTableName;
-  @override
-  String get actualTableName => $name;
-  static const String $name = 'unlock_sessions';
-  @override
-  VerificationContext validateIntegrity(Insertable<UnlockSession> instance,
-      {bool isInserting = false}) {
-    final context = VerificationContext();
-    final data = instance.toColumns(true);
-    if (data.containsKey('id')) {
-      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
-    }
-    if (data.containsKey('package_name')) {
-      context.handle(
-          _packageNameMeta,
-          packageName.isAcceptableOrUnknown(
-              data['package_name']!, _packageNameMeta));
-    } else if (isInserting) {
-      context.missing(_packageNameMeta);
-    }
-    if (data.containsKey('started_at')) {
-      context.handle(_startedAtMeta,
-          startedAt.isAcceptableOrUnknown(data['started_at']!, _startedAtMeta));
-    }
-    if (data.containsKey('expires_at')) {
-      context.handle(_expiresAtMeta,
-          expiresAt.isAcceptableOrUnknown(data['expires_at']!, _expiresAtMeta));
-    } else if (isInserting) {
-      context.missing(_expiresAtMeta);
-    }
-    if (data.containsKey('required_cards')) {
-      context.handle(
-          _requiredCardsMeta,
-          requiredCards.isAcceptableOrUnknown(
-              data['required_cards']!, _requiredCardsMeta));
-    } else if (isInserting) {
-      context.missing(_requiredCardsMeta);
-    }
-    if (data.containsKey('completed_cards')) {
-      context.handle(
-          _completedCardsMeta,
-          completedCards.isAcceptableOrUnknown(
-              data['completed_cards']!, _completedCardsMeta));
-    }
-    context.handle(_statusMeta, const VerificationResult.success());
-    return context;
-  }
-
-  @override
-  Set<GeneratedColumn> get $primaryKey => {id};
-  @override
-  UnlockSession map(Map<String, dynamic> data, {String? tablePrefix}) {
-    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
-    return UnlockSession(
-      id: attachedDatabase.typeMapping
-          .read(DriftSqlType.int, data['${effectivePrefix}id'])!,
-      packageName: attachedDatabase.typeMapping
-          .read(DriftSqlType.string, data['${effectivePrefix}package_name'])!,
-      startedAt: attachedDatabase.typeMapping
-          .read(DriftSqlType.int, data['${effectivePrefix}started_at'])!,
-      expiresAt: attachedDatabase.typeMapping
-          .read(DriftSqlType.int, data['${effectivePrefix}expires_at'])!,
-      requiredCards: attachedDatabase.typeMapping
-          .read(DriftSqlType.int, data['${effectivePrefix}required_cards'])!,
-      completedCards: attachedDatabase.typeMapping
-          .read(DriftSqlType.int, data['${effectivePrefix}completed_cards'])!,
-      status: $UnlockSessionsTable.$converterstatus.fromSql(attachedDatabase
-          .typeMapping
-          .read(DriftSqlType.int, data['${effectivePrefix}status'])!),
-    );
-  }
-
-  @override
-  $UnlockSessionsTable createAlias(String alias) {
-    return $UnlockSessionsTable(attachedDatabase, alias);
-  }
-
-  static JsonTypeConverter2<UnlockStatus, int, int> $converterstatus =
-      const EnumIndexConverter<UnlockStatus>(UnlockStatus.values);
-}
-
-class UnlockSession extends DataClass implements Insertable<UnlockSession> {
-  final int id;
-  final String packageName;
-  final int startedAt;
-  final int expiresAt;
-  final int requiredCards;
-  final int completedCards;
-  final UnlockStatus status;
-  const UnlockSession(
-      {required this.id,
-      required this.packageName,
-      required this.startedAt,
-      required this.expiresAt,
-      required this.requiredCards,
-      required this.completedCards,
-      required this.status});
-  @override
-  Map<String, Expression> toColumns(bool nullToAbsent) {
-    final map = <String, Expression>{};
-    map['id'] = Variable<int>(id);
-    map['package_name'] = Variable<String>(packageName);
-    map['started_at'] = Variable<int>(startedAt);
-    map['expires_at'] = Variable<int>(expiresAt);
-    map['required_cards'] = Variable<int>(requiredCards);
-    map['completed_cards'] = Variable<int>(completedCards);
-    {
-      map['status'] =
-          Variable<int>($UnlockSessionsTable.$converterstatus.toSql(status));
-    }
-    return map;
-  }
-
-  UnlockSessionsCompanion toCompanion(bool nullToAbsent) {
-    return UnlockSessionsCompanion(
-      id: Value(id),
-      packageName: Value(packageName),
-      startedAt: Value(startedAt),
-      expiresAt: Value(expiresAt),
-      requiredCards: Value(requiredCards),
-      completedCards: Value(completedCards),
-      status: Value(status),
-    );
-  }
-
-  factory UnlockSession.fromJson(Map<String, dynamic> json,
-      {ValueSerializer? serializer}) {
-    serializer ??= driftRuntimeOptions.defaultSerializer;
-    return UnlockSession(
-      id: serializer.fromJson<int>(json['id']),
-      packageName: serializer.fromJson<String>(json['packageName']),
-      startedAt: serializer.fromJson<int>(json['startedAt']),
-      expiresAt: serializer.fromJson<int>(json['expiresAt']),
-      requiredCards: serializer.fromJson<int>(json['requiredCards']),
-      completedCards: serializer.fromJson<int>(json['completedCards']),
-      status: $UnlockSessionsTable.$converterstatus
-          .fromJson(serializer.fromJson<int>(json['status'])),
-    );
-  }
-  @override
-  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
-    serializer ??= driftRuntimeOptions.defaultSerializer;
-    return <String, dynamic>{
-      'id': serializer.toJson<int>(id),
-      'packageName': serializer.toJson<String>(packageName),
-      'startedAt': serializer.toJson<int>(startedAt),
-      'expiresAt': serializer.toJson<int>(expiresAt),
-      'requiredCards': serializer.toJson<int>(requiredCards),
-      'completedCards': serializer.toJson<int>(completedCards),
-      'status': serializer
-          .toJson<int>($UnlockSessionsTable.$converterstatus.toJson(status)),
-    };
-  }
-
-  UnlockSession copyWith(
-          {int? id,
-          String? packageName,
-          int? startedAt,
-          int? expiresAt,
-          int? requiredCards,
-          int? completedCards,
-          UnlockStatus? status}) =>
-      UnlockSession(
-        id: id ?? this.id,
-        packageName: packageName ?? this.packageName,
-        startedAt: startedAt ?? this.startedAt,
-        expiresAt: expiresAt ?? this.expiresAt,
-        requiredCards: requiredCards ?? this.requiredCards,
-        completedCards: completedCards ?? this.completedCards,
-        status: status ?? this.status,
-      );
-  UnlockSession copyWithCompanion(UnlockSessionsCompanion data) {
-    return UnlockSession(
-      id: data.id.present ? data.id.value : this.id,
-      packageName:
-          data.packageName.present ? data.packageName.value : this.packageName,
-      startedAt: data.startedAt.present ? data.startedAt.value : this.startedAt,
-      expiresAt: data.expiresAt.present ? data.expiresAt.value : this.expiresAt,
-      requiredCards: data.requiredCards.present
-          ? data.requiredCards.value
-          : this.requiredCards,
-      completedCards: data.completedCards.present
-          ? data.completedCards.value
-          : this.completedCards,
-      status: data.status.present ? data.status.value : this.status,
-    );
-  }
-
-  @override
-  String toString() {
-    return (StringBuffer('UnlockSession(')
-          ..write('id: $id, ')
-          ..write('packageName: $packageName, ')
-          ..write('startedAt: $startedAt, ')
-          ..write('expiresAt: $expiresAt, ')
-          ..write('requiredCards: $requiredCards, ')
-          ..write('completedCards: $completedCards, ')
-          ..write('status: $status')
-          ..write(')'))
-        .toString();
-  }
-
-  @override
-  int get hashCode => Object.hash(id, packageName, startedAt, expiresAt,
-      requiredCards, completedCards, status);
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      (other is UnlockSession &&
-          other.id == this.id &&
-          other.packageName == this.packageName &&
-          other.startedAt == this.startedAt &&
-          other.expiresAt == this.expiresAt &&
-          other.requiredCards == this.requiredCards &&
-          other.completedCards == this.completedCards &&
-          other.status == this.status);
-}
-
-class UnlockSessionsCompanion extends UpdateCompanion<UnlockSession> {
-  final Value<int> id;
-  final Value<String> packageName;
-  final Value<int> startedAt;
-  final Value<int> expiresAt;
-  final Value<int> requiredCards;
-  final Value<int> completedCards;
-  final Value<UnlockStatus> status;
-  const UnlockSessionsCompanion({
-    this.id = const Value.absent(),
-    this.packageName = const Value.absent(),
-    this.startedAt = const Value.absent(),
-    this.expiresAt = const Value.absent(),
-    this.requiredCards = const Value.absent(),
-    this.completedCards = const Value.absent(),
-    this.status = const Value.absent(),
-  });
-  UnlockSessionsCompanion.insert({
-    this.id = const Value.absent(),
-    required String packageName,
-    this.startedAt = const Value.absent(),
-    required int expiresAt,
-    required int requiredCards,
-    this.completedCards = const Value.absent(),
-    this.status = const Value.absent(),
-  })  : packageName = Value(packageName),
-        expiresAt = Value(expiresAt),
-        requiredCards = Value(requiredCards);
-  static Insertable<UnlockSession> custom({
-    Expression<int>? id,
-    Expression<String>? packageName,
-    Expression<int>? startedAt,
-    Expression<int>? expiresAt,
-    Expression<int>? requiredCards,
-    Expression<int>? completedCards,
-    Expression<int>? status,
-  }) {
-    return RawValuesInsertable({
-      if (id != null) 'id': id,
-      if (packageName != null) 'package_name': packageName,
-      if (startedAt != null) 'started_at': startedAt,
-      if (expiresAt != null) 'expires_at': expiresAt,
-      if (requiredCards != null) 'required_cards': requiredCards,
-      if (completedCards != null) 'completed_cards': completedCards,
-      if (status != null) 'status': status,
-    });
-  }
-
-  UnlockSessionsCompanion copyWith(
-      {Value<int>? id,
-      Value<String>? packageName,
-      Value<int>? startedAt,
-      Value<int>? expiresAt,
-      Value<int>? requiredCards,
-      Value<int>? completedCards,
-      Value<UnlockStatus>? status}) {
-    return UnlockSessionsCompanion(
-      id: id ?? this.id,
-      packageName: packageName ?? this.packageName,
-      startedAt: startedAt ?? this.startedAt,
-      expiresAt: expiresAt ?? this.expiresAt,
-      requiredCards: requiredCards ?? this.requiredCards,
-      completedCards: completedCards ?? this.completedCards,
-      status: status ?? this.status,
-    );
-  }
-
-  @override
-  Map<String, Expression> toColumns(bool nullToAbsent) {
-    final map = <String, Expression>{};
-    if (id.present) {
-      map['id'] = Variable<int>(id.value);
-    }
-    if (packageName.present) {
-      map['package_name'] = Variable<String>(packageName.value);
-    }
-    if (startedAt.present) {
-      map['started_at'] = Variable<int>(startedAt.value);
-    }
-    if (expiresAt.present) {
-      map['expires_at'] = Variable<int>(expiresAt.value);
-    }
-    if (requiredCards.present) {
-      map['required_cards'] = Variable<int>(requiredCards.value);
-    }
-    if (completedCards.present) {
-      map['completed_cards'] = Variable<int>(completedCards.value);
-    }
-    if (status.present) {
-      map['status'] = Variable<int>(
-          $UnlockSessionsTable.$converterstatus.toSql(status.value));
-    }
-    return map;
-  }
-
-  @override
-  String toString() {
-    return (StringBuffer('UnlockSessionsCompanion(')
-          ..write('id: $id, ')
-          ..write('packageName: $packageName, ')
-          ..write('startedAt: $startedAt, ')
-          ..write('expiresAt: $expiresAt, ')
-          ..write('requiredCards: $requiredCards, ')
-          ..write('completedCards: $completedCards, ')
-          ..write('status: $status')
           ..write(')'))
         .toString();
   }
@@ -1358,19 +874,373 @@ class DailyStatsCompanion extends UpdateCompanion<DailyStat> {
   }
 }
 
+class $InstalledAppsCacheTable extends InstalledAppsCache
+    with TableInfo<$InstalledAppsCacheTable, CachedInstalledApp> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $InstalledAppsCacheTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _packageNameMeta =
+      const VerificationMeta('packageName');
+  @override
+  late final GeneratedColumn<String> packageName = GeneratedColumn<String>(
+      'package_name', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _displayNameMeta =
+      const VerificationMeta('displayName');
+  @override
+  late final GeneratedColumn<String> displayName = GeneratedColumn<String>(
+      'display_name', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _isSystemMeta =
+      const VerificationMeta('isSystem');
+  @override
+  late final GeneratedColumn<bool> isSystem = GeneratedColumn<bool>(
+      'is_system', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('CHECK ("is_system" IN (0, 1))'),
+      defaultValue: const Constant(false));
+  static const VerificationMeta _iconMeta = const VerificationMeta('icon');
+  @override
+  late final GeneratedColumn<Uint8List> icon = GeneratedColumn<Uint8List>(
+      'icon', aliasedName, true,
+      type: DriftSqlType.blob, requiredDuringInsert: false);
+  static const VerificationMeta _usageMsMeta =
+      const VerificationMeta('usageMs');
+  @override
+  late final GeneratedColumn<int> usageMs = GeneratedColumn<int>(
+      'usage_ms', aliasedName, false,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(0));
+  static const VerificationMeta _cachedAtMeta =
+      const VerificationMeta('cachedAt');
+  @override
+  late final GeneratedColumn<int> cachedAt = GeneratedColumn<int>(
+      'cached_at', aliasedName, false,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultValue: Constant(DateTime.now().millisecondsSinceEpoch));
+  @override
+  List<GeneratedColumn> get $columns =>
+      [packageName, displayName, isSystem, icon, usageMs, cachedAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'installed_apps_cache';
+  @override
+  VerificationContext validateIntegrity(Insertable<CachedInstalledApp> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('package_name')) {
+      context.handle(
+          _packageNameMeta,
+          packageName.isAcceptableOrUnknown(
+              data['package_name']!, _packageNameMeta));
+    } else if (isInserting) {
+      context.missing(_packageNameMeta);
+    }
+    if (data.containsKey('display_name')) {
+      context.handle(
+          _displayNameMeta,
+          displayName.isAcceptableOrUnknown(
+              data['display_name']!, _displayNameMeta));
+    } else if (isInserting) {
+      context.missing(_displayNameMeta);
+    }
+    if (data.containsKey('is_system')) {
+      context.handle(_isSystemMeta,
+          isSystem.isAcceptableOrUnknown(data['is_system']!, _isSystemMeta));
+    }
+    if (data.containsKey('icon')) {
+      context.handle(
+          _iconMeta, icon.isAcceptableOrUnknown(data['icon']!, _iconMeta));
+    }
+    if (data.containsKey('usage_ms')) {
+      context.handle(_usageMsMeta,
+          usageMs.isAcceptableOrUnknown(data['usage_ms']!, _usageMsMeta));
+    }
+    if (data.containsKey('cached_at')) {
+      context.handle(_cachedAtMeta,
+          cachedAt.isAcceptableOrUnknown(data['cached_at']!, _cachedAtMeta));
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {packageName};
+  @override
+  CachedInstalledApp map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return CachedInstalledApp(
+      packageName: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}package_name'])!,
+      displayName: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}display_name'])!,
+      isSystem: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}is_system'])!,
+      icon: attachedDatabase.typeMapping
+          .read(DriftSqlType.blob, data['${effectivePrefix}icon']),
+      usageMs: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}usage_ms'])!,
+      cachedAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}cached_at'])!,
+    );
+  }
+
+  @override
+  $InstalledAppsCacheTable createAlias(String alias) {
+    return $InstalledAppsCacheTable(attachedDatabase, alias);
+  }
+}
+
+class CachedInstalledApp extends DataClass
+    implements Insertable<CachedInstalledApp> {
+  final String packageName;
+  final String displayName;
+  final bool isSystem;
+  final Uint8List? icon;
+  final int usageMs;
+  final int cachedAt;
+  const CachedInstalledApp(
+      {required this.packageName,
+      required this.displayName,
+      required this.isSystem,
+      this.icon,
+      required this.usageMs,
+      required this.cachedAt});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['package_name'] = Variable<String>(packageName);
+    map['display_name'] = Variable<String>(displayName);
+    map['is_system'] = Variable<bool>(isSystem);
+    if (!nullToAbsent || icon != null) {
+      map['icon'] = Variable<Uint8List>(icon);
+    }
+    map['usage_ms'] = Variable<int>(usageMs);
+    map['cached_at'] = Variable<int>(cachedAt);
+    return map;
+  }
+
+  InstalledAppsCacheCompanion toCompanion(bool nullToAbsent) {
+    return InstalledAppsCacheCompanion(
+      packageName: Value(packageName),
+      displayName: Value(displayName),
+      isSystem: Value(isSystem),
+      icon: icon == null && nullToAbsent ? const Value.absent() : Value(icon),
+      usageMs: Value(usageMs),
+      cachedAt: Value(cachedAt),
+    );
+  }
+
+  factory CachedInstalledApp.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return CachedInstalledApp(
+      packageName: serializer.fromJson<String>(json['packageName']),
+      displayName: serializer.fromJson<String>(json['displayName']),
+      isSystem: serializer.fromJson<bool>(json['isSystem']),
+      icon: serializer.fromJson<Uint8List?>(json['icon']),
+      usageMs: serializer.fromJson<int>(json['usageMs']),
+      cachedAt: serializer.fromJson<int>(json['cachedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'packageName': serializer.toJson<String>(packageName),
+      'displayName': serializer.toJson<String>(displayName),
+      'isSystem': serializer.toJson<bool>(isSystem),
+      'icon': serializer.toJson<Uint8List?>(icon),
+      'usageMs': serializer.toJson<int>(usageMs),
+      'cachedAt': serializer.toJson<int>(cachedAt),
+    };
+  }
+
+  CachedInstalledApp copyWith(
+          {String? packageName,
+          String? displayName,
+          bool? isSystem,
+          Value<Uint8List?> icon = const Value.absent(),
+          int? usageMs,
+          int? cachedAt}) =>
+      CachedInstalledApp(
+        packageName: packageName ?? this.packageName,
+        displayName: displayName ?? this.displayName,
+        isSystem: isSystem ?? this.isSystem,
+        icon: icon.present ? icon.value : this.icon,
+        usageMs: usageMs ?? this.usageMs,
+        cachedAt: cachedAt ?? this.cachedAt,
+      );
+  CachedInstalledApp copyWithCompanion(InstalledAppsCacheCompanion data) {
+    return CachedInstalledApp(
+      packageName:
+          data.packageName.present ? data.packageName.value : this.packageName,
+      displayName:
+          data.displayName.present ? data.displayName.value : this.displayName,
+      isSystem: data.isSystem.present ? data.isSystem.value : this.isSystem,
+      icon: data.icon.present ? data.icon.value : this.icon,
+      usageMs: data.usageMs.present ? data.usageMs.value : this.usageMs,
+      cachedAt: data.cachedAt.present ? data.cachedAt.value : this.cachedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CachedInstalledApp(')
+          ..write('packageName: $packageName, ')
+          ..write('displayName: $displayName, ')
+          ..write('isSystem: $isSystem, ')
+          ..write('icon: $icon, ')
+          ..write('usageMs: $usageMs, ')
+          ..write('cachedAt: $cachedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(packageName, displayName, isSystem,
+      $driftBlobEquality.hash(icon), usageMs, cachedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CachedInstalledApp &&
+          other.packageName == this.packageName &&
+          other.displayName == this.displayName &&
+          other.isSystem == this.isSystem &&
+          $driftBlobEquality.equals(other.icon, this.icon) &&
+          other.usageMs == this.usageMs &&
+          other.cachedAt == this.cachedAt);
+}
+
+class InstalledAppsCacheCompanion extends UpdateCompanion<CachedInstalledApp> {
+  final Value<String> packageName;
+  final Value<String> displayName;
+  final Value<bool> isSystem;
+  final Value<Uint8List?> icon;
+  final Value<int> usageMs;
+  final Value<int> cachedAt;
+  final Value<int> rowid;
+  const InstalledAppsCacheCompanion({
+    this.packageName = const Value.absent(),
+    this.displayName = const Value.absent(),
+    this.isSystem = const Value.absent(),
+    this.icon = const Value.absent(),
+    this.usageMs = const Value.absent(),
+    this.cachedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  InstalledAppsCacheCompanion.insert({
+    required String packageName,
+    required String displayName,
+    this.isSystem = const Value.absent(),
+    this.icon = const Value.absent(),
+    this.usageMs = const Value.absent(),
+    this.cachedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  })  : packageName = Value(packageName),
+        displayName = Value(displayName);
+  static Insertable<CachedInstalledApp> custom({
+    Expression<String>? packageName,
+    Expression<String>? displayName,
+    Expression<bool>? isSystem,
+    Expression<Uint8List>? icon,
+    Expression<int>? usageMs,
+    Expression<int>? cachedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (packageName != null) 'package_name': packageName,
+      if (displayName != null) 'display_name': displayName,
+      if (isSystem != null) 'is_system': isSystem,
+      if (icon != null) 'icon': icon,
+      if (usageMs != null) 'usage_ms': usageMs,
+      if (cachedAt != null) 'cached_at': cachedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  InstalledAppsCacheCompanion copyWith(
+      {Value<String>? packageName,
+      Value<String>? displayName,
+      Value<bool>? isSystem,
+      Value<Uint8List?>? icon,
+      Value<int>? usageMs,
+      Value<int>? cachedAt,
+      Value<int>? rowid}) {
+    return InstalledAppsCacheCompanion(
+      packageName: packageName ?? this.packageName,
+      displayName: displayName ?? this.displayName,
+      isSystem: isSystem ?? this.isSystem,
+      icon: icon ?? this.icon,
+      usageMs: usageMs ?? this.usageMs,
+      cachedAt: cachedAt ?? this.cachedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (packageName.present) {
+      map['package_name'] = Variable<String>(packageName.value);
+    }
+    if (displayName.present) {
+      map['display_name'] = Variable<String>(displayName.value);
+    }
+    if (isSystem.present) {
+      map['is_system'] = Variable<bool>(isSystem.value);
+    }
+    if (icon.present) {
+      map['icon'] = Variable<Uint8List>(icon.value);
+    }
+    if (usageMs.present) {
+      map['usage_ms'] = Variable<int>(usageMs.value);
+    }
+    if (cachedAt.present) {
+      map['cached_at'] = Variable<int>(cachedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('InstalledAppsCacheCompanion(')
+          ..write('packageName: $packageName, ')
+          ..write('displayName: $displayName, ')
+          ..write('isSystem: $isSystem, ')
+          ..write('icon: $icon, ')
+          ..write('usageMs: $usageMs, ')
+          ..write('cachedAt: $cachedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
   late final $BlockedAppsTable blockedApps = $BlockedAppsTable(this);
   late final $BlockRulesTable blockRules = $BlockRulesTable(this);
-  late final $UnlockSessionsTable unlockSessions = $UnlockSessionsTable(this);
   late final $DailyStatsTable dailyStats = $DailyStatsTable(this);
+  late final $InstalledAppsCacheTable installedAppsCache =
+      $InstalledAppsCacheTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
   List<DatabaseSchemaEntity> get allSchemaEntities =>
-      [blockedApps, blockRules, unlockSessions, dailyStats];
+      [blockedApps, blockRules, dailyStats, installedAppsCache];
 }
 
 typedef $$BlockedAppsTableCreateCompanionBuilder = BlockedAppsCompanion
@@ -1530,8 +1400,6 @@ typedef $$BlockRulesTableCreateCompanionBuilder = BlockRulesCompanion Function({
   Value<int> cardsRequired,
   Value<int> unlockDurationMinutes,
   Value<bool> isEnabled,
-  Value<int> dailyNewCardsLimit,
-  Value<int> dailyReviewsLimit,
   Value<int> updatedAt,
 });
 typedef $$BlockRulesTableUpdateCompanionBuilder = BlockRulesCompanion Function({
@@ -1539,8 +1407,6 @@ typedef $$BlockRulesTableUpdateCompanionBuilder = BlockRulesCompanion Function({
   Value<int> cardsRequired,
   Value<int> unlockDurationMinutes,
   Value<bool> isEnabled,
-  Value<int> dailyNewCardsLimit,
-  Value<int> dailyReviewsLimit,
   Value<int> updatedAt,
 });
 
@@ -1565,14 +1431,6 @@ class $$BlockRulesTableFilterComposer
 
   ColumnFilters<bool> get isEnabled => $composableBuilder(
       column: $table.isEnabled, builder: (column) => ColumnFilters(column));
-
-  ColumnFilters<int> get dailyNewCardsLimit => $composableBuilder(
-      column: $table.dailyNewCardsLimit,
-      builder: (column) => ColumnFilters(column));
-
-  ColumnFilters<int> get dailyReviewsLimit => $composableBuilder(
-      column: $table.dailyReviewsLimit,
-      builder: (column) => ColumnFilters(column));
 
   ColumnFilters<int> get updatedAt => $composableBuilder(
       column: $table.updatedAt, builder: (column) => ColumnFilters(column));
@@ -1601,14 +1459,6 @@ class $$BlockRulesTableOrderingComposer
   ColumnOrderings<bool> get isEnabled => $composableBuilder(
       column: $table.isEnabled, builder: (column) => ColumnOrderings(column));
 
-  ColumnOrderings<int> get dailyNewCardsLimit => $composableBuilder(
-      column: $table.dailyNewCardsLimit,
-      builder: (column) => ColumnOrderings(column));
-
-  ColumnOrderings<int> get dailyReviewsLimit => $composableBuilder(
-      column: $table.dailyReviewsLimit,
-      builder: (column) => ColumnOrderings(column));
-
   ColumnOrderings<int> get updatedAt => $composableBuilder(
       column: $table.updatedAt, builder: (column) => ColumnOrderings(column));
 }
@@ -1633,12 +1483,6 @@ class $$BlockRulesTableAnnotationComposer
 
   GeneratedColumn<bool> get isEnabled =>
       $composableBuilder(column: $table.isEnabled, builder: (column) => column);
-
-  GeneratedColumn<int> get dailyNewCardsLimit => $composableBuilder(
-      column: $table.dailyNewCardsLimit, builder: (column) => column);
-
-  GeneratedColumn<int> get dailyReviewsLimit => $composableBuilder(
-      column: $table.dailyReviewsLimit, builder: (column) => column);
 
   GeneratedColumn<int> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
@@ -1671,8 +1515,6 @@ class $$BlockRulesTableTableManager extends RootTableManager<
             Value<int> cardsRequired = const Value.absent(),
             Value<int> unlockDurationMinutes = const Value.absent(),
             Value<bool> isEnabled = const Value.absent(),
-            Value<int> dailyNewCardsLimit = const Value.absent(),
-            Value<int> dailyReviewsLimit = const Value.absent(),
             Value<int> updatedAt = const Value.absent(),
           }) =>
               BlockRulesCompanion(
@@ -1680,8 +1522,6 @@ class $$BlockRulesTableTableManager extends RootTableManager<
             cardsRequired: cardsRequired,
             unlockDurationMinutes: unlockDurationMinutes,
             isEnabled: isEnabled,
-            dailyNewCardsLimit: dailyNewCardsLimit,
-            dailyReviewsLimit: dailyReviewsLimit,
             updatedAt: updatedAt,
           ),
           createCompanionCallback: ({
@@ -1689,8 +1529,6 @@ class $$BlockRulesTableTableManager extends RootTableManager<
             Value<int> cardsRequired = const Value.absent(),
             Value<int> unlockDurationMinutes = const Value.absent(),
             Value<bool> isEnabled = const Value.absent(),
-            Value<int> dailyNewCardsLimit = const Value.absent(),
-            Value<int> dailyReviewsLimit = const Value.absent(),
             Value<int> updatedAt = const Value.absent(),
           }) =>
               BlockRulesCompanion.insert(
@@ -1698,8 +1536,6 @@ class $$BlockRulesTableTableManager extends RootTableManager<
             cardsRequired: cardsRequired,
             unlockDurationMinutes: unlockDurationMinutes,
             isEnabled: isEnabled,
-            dailyNewCardsLimit: dailyNewCardsLimit,
-            dailyReviewsLimit: dailyReviewsLimit,
             updatedAt: updatedAt,
           ),
           withReferenceMapper: (p0) => p0
@@ -1720,209 +1556,6 @@ typedef $$BlockRulesTableProcessedTableManager = ProcessedTableManager<
     $$BlockRulesTableUpdateCompanionBuilder,
     (BlockRule, BaseReferences<_$AppDatabase, $BlockRulesTable, BlockRule>),
     BlockRule,
-    PrefetchHooks Function()>;
-typedef $$UnlockSessionsTableCreateCompanionBuilder = UnlockSessionsCompanion
-    Function({
-  Value<int> id,
-  required String packageName,
-  Value<int> startedAt,
-  required int expiresAt,
-  required int requiredCards,
-  Value<int> completedCards,
-  Value<UnlockStatus> status,
-});
-typedef $$UnlockSessionsTableUpdateCompanionBuilder = UnlockSessionsCompanion
-    Function({
-  Value<int> id,
-  Value<String> packageName,
-  Value<int> startedAt,
-  Value<int> expiresAt,
-  Value<int> requiredCards,
-  Value<int> completedCards,
-  Value<UnlockStatus> status,
-});
-
-class $$UnlockSessionsTableFilterComposer
-    extends Composer<_$AppDatabase, $UnlockSessionsTable> {
-  $$UnlockSessionsTableFilterComposer({
-    required super.$db,
-    required super.$table,
-    super.joinBuilder,
-    super.$addJoinBuilderToRootComposer,
-    super.$removeJoinBuilderFromRootComposer,
-  });
-  ColumnFilters<int> get id => $composableBuilder(
-      column: $table.id, builder: (column) => ColumnFilters(column));
-
-  ColumnFilters<String> get packageName => $composableBuilder(
-      column: $table.packageName, builder: (column) => ColumnFilters(column));
-
-  ColumnFilters<int> get startedAt => $composableBuilder(
-      column: $table.startedAt, builder: (column) => ColumnFilters(column));
-
-  ColumnFilters<int> get expiresAt => $composableBuilder(
-      column: $table.expiresAt, builder: (column) => ColumnFilters(column));
-
-  ColumnFilters<int> get requiredCards => $composableBuilder(
-      column: $table.requiredCards, builder: (column) => ColumnFilters(column));
-
-  ColumnFilters<int> get completedCards => $composableBuilder(
-      column: $table.completedCards,
-      builder: (column) => ColumnFilters(column));
-
-  ColumnWithTypeConverterFilters<UnlockStatus, UnlockStatus, int> get status =>
-      $composableBuilder(
-          column: $table.status,
-          builder: (column) => ColumnWithTypeConverterFilters(column));
-}
-
-class $$UnlockSessionsTableOrderingComposer
-    extends Composer<_$AppDatabase, $UnlockSessionsTable> {
-  $$UnlockSessionsTableOrderingComposer({
-    required super.$db,
-    required super.$table,
-    super.joinBuilder,
-    super.$addJoinBuilderToRootComposer,
-    super.$removeJoinBuilderFromRootComposer,
-  });
-  ColumnOrderings<int> get id => $composableBuilder(
-      column: $table.id, builder: (column) => ColumnOrderings(column));
-
-  ColumnOrderings<String> get packageName => $composableBuilder(
-      column: $table.packageName, builder: (column) => ColumnOrderings(column));
-
-  ColumnOrderings<int> get startedAt => $composableBuilder(
-      column: $table.startedAt, builder: (column) => ColumnOrderings(column));
-
-  ColumnOrderings<int> get expiresAt => $composableBuilder(
-      column: $table.expiresAt, builder: (column) => ColumnOrderings(column));
-
-  ColumnOrderings<int> get requiredCards => $composableBuilder(
-      column: $table.requiredCards,
-      builder: (column) => ColumnOrderings(column));
-
-  ColumnOrderings<int> get completedCards => $composableBuilder(
-      column: $table.completedCards,
-      builder: (column) => ColumnOrderings(column));
-
-  ColumnOrderings<int> get status => $composableBuilder(
-      column: $table.status, builder: (column) => ColumnOrderings(column));
-}
-
-class $$UnlockSessionsTableAnnotationComposer
-    extends Composer<_$AppDatabase, $UnlockSessionsTable> {
-  $$UnlockSessionsTableAnnotationComposer({
-    required super.$db,
-    required super.$table,
-    super.joinBuilder,
-    super.$addJoinBuilderToRootComposer,
-    super.$removeJoinBuilderFromRootComposer,
-  });
-  GeneratedColumn<int> get id =>
-      $composableBuilder(column: $table.id, builder: (column) => column);
-
-  GeneratedColumn<String> get packageName => $composableBuilder(
-      column: $table.packageName, builder: (column) => column);
-
-  GeneratedColumn<int> get startedAt =>
-      $composableBuilder(column: $table.startedAt, builder: (column) => column);
-
-  GeneratedColumn<int> get expiresAt =>
-      $composableBuilder(column: $table.expiresAt, builder: (column) => column);
-
-  GeneratedColumn<int> get requiredCards => $composableBuilder(
-      column: $table.requiredCards, builder: (column) => column);
-
-  GeneratedColumn<int> get completedCards => $composableBuilder(
-      column: $table.completedCards, builder: (column) => column);
-
-  GeneratedColumnWithTypeConverter<UnlockStatus, int> get status =>
-      $composableBuilder(column: $table.status, builder: (column) => column);
-}
-
-class $$UnlockSessionsTableTableManager extends RootTableManager<
-    _$AppDatabase,
-    $UnlockSessionsTable,
-    UnlockSession,
-    $$UnlockSessionsTableFilterComposer,
-    $$UnlockSessionsTableOrderingComposer,
-    $$UnlockSessionsTableAnnotationComposer,
-    $$UnlockSessionsTableCreateCompanionBuilder,
-    $$UnlockSessionsTableUpdateCompanionBuilder,
-    (
-      UnlockSession,
-      BaseReferences<_$AppDatabase, $UnlockSessionsTable, UnlockSession>
-    ),
-    UnlockSession,
-    PrefetchHooks Function()> {
-  $$UnlockSessionsTableTableManager(
-      _$AppDatabase db, $UnlockSessionsTable table)
-      : super(TableManagerState(
-          db: db,
-          table: table,
-          createFilteringComposer: () =>
-              $$UnlockSessionsTableFilterComposer($db: db, $table: table),
-          createOrderingComposer: () =>
-              $$UnlockSessionsTableOrderingComposer($db: db, $table: table),
-          createComputedFieldComposer: () =>
-              $$UnlockSessionsTableAnnotationComposer($db: db, $table: table),
-          updateCompanionCallback: ({
-            Value<int> id = const Value.absent(),
-            Value<String> packageName = const Value.absent(),
-            Value<int> startedAt = const Value.absent(),
-            Value<int> expiresAt = const Value.absent(),
-            Value<int> requiredCards = const Value.absent(),
-            Value<int> completedCards = const Value.absent(),
-            Value<UnlockStatus> status = const Value.absent(),
-          }) =>
-              UnlockSessionsCompanion(
-            id: id,
-            packageName: packageName,
-            startedAt: startedAt,
-            expiresAt: expiresAt,
-            requiredCards: requiredCards,
-            completedCards: completedCards,
-            status: status,
-          ),
-          createCompanionCallback: ({
-            Value<int> id = const Value.absent(),
-            required String packageName,
-            Value<int> startedAt = const Value.absent(),
-            required int expiresAt,
-            required int requiredCards,
-            Value<int> completedCards = const Value.absent(),
-            Value<UnlockStatus> status = const Value.absent(),
-          }) =>
-              UnlockSessionsCompanion.insert(
-            id: id,
-            packageName: packageName,
-            startedAt: startedAt,
-            expiresAt: expiresAt,
-            requiredCards: requiredCards,
-            completedCards: completedCards,
-            status: status,
-          ),
-          withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
-              .toList(),
-          prefetchHooksCallback: null,
-        ));
-}
-
-typedef $$UnlockSessionsTableProcessedTableManager = ProcessedTableManager<
-    _$AppDatabase,
-    $UnlockSessionsTable,
-    UnlockSession,
-    $$UnlockSessionsTableFilterComposer,
-    $$UnlockSessionsTableOrderingComposer,
-    $$UnlockSessionsTableAnnotationComposer,
-    $$UnlockSessionsTableCreateCompanionBuilder,
-    $$UnlockSessionsTableUpdateCompanionBuilder,
-    (
-      UnlockSession,
-      BaseReferences<_$AppDatabase, $UnlockSessionsTable, UnlockSession>
-    ),
-    UnlockSession,
     PrefetchHooks Function()>;
 typedef $$DailyStatsTableCreateCompanionBuilder = DailyStatsCompanion Function({
   required String date,
@@ -2078,6 +1711,198 @@ typedef $$DailyStatsTableProcessedTableManager = ProcessedTableManager<
     (DailyStat, BaseReferences<_$AppDatabase, $DailyStatsTable, DailyStat>),
     DailyStat,
     PrefetchHooks Function()>;
+typedef $$InstalledAppsCacheTableCreateCompanionBuilder
+    = InstalledAppsCacheCompanion Function({
+  required String packageName,
+  required String displayName,
+  Value<bool> isSystem,
+  Value<Uint8List?> icon,
+  Value<int> usageMs,
+  Value<int> cachedAt,
+  Value<int> rowid,
+});
+typedef $$InstalledAppsCacheTableUpdateCompanionBuilder
+    = InstalledAppsCacheCompanion Function({
+  Value<String> packageName,
+  Value<String> displayName,
+  Value<bool> isSystem,
+  Value<Uint8List?> icon,
+  Value<int> usageMs,
+  Value<int> cachedAt,
+  Value<int> rowid,
+});
+
+class $$InstalledAppsCacheTableFilterComposer
+    extends Composer<_$AppDatabase, $InstalledAppsCacheTable> {
+  $$InstalledAppsCacheTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get packageName => $composableBuilder(
+      column: $table.packageName, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get displayName => $composableBuilder(
+      column: $table.displayName, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<bool> get isSystem => $composableBuilder(
+      column: $table.isSystem, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<Uint8List> get icon => $composableBuilder(
+      column: $table.icon, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get usageMs => $composableBuilder(
+      column: $table.usageMs, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get cachedAt => $composableBuilder(
+      column: $table.cachedAt, builder: (column) => ColumnFilters(column));
+}
+
+class $$InstalledAppsCacheTableOrderingComposer
+    extends Composer<_$AppDatabase, $InstalledAppsCacheTable> {
+  $$InstalledAppsCacheTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get packageName => $composableBuilder(
+      column: $table.packageName, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get displayName => $composableBuilder(
+      column: $table.displayName, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<bool> get isSystem => $composableBuilder(
+      column: $table.isSystem, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<Uint8List> get icon => $composableBuilder(
+      column: $table.icon, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get usageMs => $composableBuilder(
+      column: $table.usageMs, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get cachedAt => $composableBuilder(
+      column: $table.cachedAt, builder: (column) => ColumnOrderings(column));
+}
+
+class $$InstalledAppsCacheTableAnnotationComposer
+    extends Composer<_$AppDatabase, $InstalledAppsCacheTable> {
+  $$InstalledAppsCacheTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get packageName => $composableBuilder(
+      column: $table.packageName, builder: (column) => column);
+
+  GeneratedColumn<String> get displayName => $composableBuilder(
+      column: $table.displayName, builder: (column) => column);
+
+  GeneratedColumn<bool> get isSystem =>
+      $composableBuilder(column: $table.isSystem, builder: (column) => column);
+
+  GeneratedColumn<Uint8List> get icon =>
+      $composableBuilder(column: $table.icon, builder: (column) => column);
+
+  GeneratedColumn<int> get usageMs =>
+      $composableBuilder(column: $table.usageMs, builder: (column) => column);
+
+  GeneratedColumn<int> get cachedAt =>
+      $composableBuilder(column: $table.cachedAt, builder: (column) => column);
+}
+
+class $$InstalledAppsCacheTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $InstalledAppsCacheTable,
+    CachedInstalledApp,
+    $$InstalledAppsCacheTableFilterComposer,
+    $$InstalledAppsCacheTableOrderingComposer,
+    $$InstalledAppsCacheTableAnnotationComposer,
+    $$InstalledAppsCacheTableCreateCompanionBuilder,
+    $$InstalledAppsCacheTableUpdateCompanionBuilder,
+    (
+      CachedInstalledApp,
+      BaseReferences<_$AppDatabase, $InstalledAppsCacheTable,
+          CachedInstalledApp>
+    ),
+    CachedInstalledApp,
+    PrefetchHooks Function()> {
+  $$InstalledAppsCacheTableTableManager(
+      _$AppDatabase db, $InstalledAppsCacheTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$InstalledAppsCacheTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$InstalledAppsCacheTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$InstalledAppsCacheTableAnnotationComposer(
+                  $db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<String> packageName = const Value.absent(),
+            Value<String> displayName = const Value.absent(),
+            Value<bool> isSystem = const Value.absent(),
+            Value<Uint8List?> icon = const Value.absent(),
+            Value<int> usageMs = const Value.absent(),
+            Value<int> cachedAt = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              InstalledAppsCacheCompanion(
+            packageName: packageName,
+            displayName: displayName,
+            isSystem: isSystem,
+            icon: icon,
+            usageMs: usageMs,
+            cachedAt: cachedAt,
+            rowid: rowid,
+          ),
+          createCompanionCallback: ({
+            required String packageName,
+            required String displayName,
+            Value<bool> isSystem = const Value.absent(),
+            Value<Uint8List?> icon = const Value.absent(),
+            Value<int> usageMs = const Value.absent(),
+            Value<int> cachedAt = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              InstalledAppsCacheCompanion.insert(
+            packageName: packageName,
+            displayName: displayName,
+            isSystem: isSystem,
+            icon: icon,
+            usageMs: usageMs,
+            cachedAt: cachedAt,
+            rowid: rowid,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ));
+}
+
+typedef $$InstalledAppsCacheTableProcessedTableManager = ProcessedTableManager<
+    _$AppDatabase,
+    $InstalledAppsCacheTable,
+    CachedInstalledApp,
+    $$InstalledAppsCacheTableFilterComposer,
+    $$InstalledAppsCacheTableOrderingComposer,
+    $$InstalledAppsCacheTableAnnotationComposer,
+    $$InstalledAppsCacheTableCreateCompanionBuilder,
+    $$InstalledAppsCacheTableUpdateCompanionBuilder,
+    (
+      CachedInstalledApp,
+      BaseReferences<_$AppDatabase, $InstalledAppsCacheTable,
+          CachedInstalledApp>
+    ),
+    CachedInstalledApp,
+    PrefetchHooks Function()>;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -2086,8 +1911,8 @@ class $AppDatabaseManager {
       $$BlockedAppsTableTableManager(_db, _db.blockedApps);
   $$BlockRulesTableTableManager get blockRules =>
       $$BlockRulesTableTableManager(_db, _db.blockRules);
-  $$UnlockSessionsTableTableManager get unlockSessions =>
-      $$UnlockSessionsTableTableManager(_db, _db.unlockSessions);
   $$DailyStatsTableTableManager get dailyStats =>
       $$DailyStatsTableTableManager(_db, _db.dailyStats);
+  $$InstalledAppsCacheTableTableManager get installedAppsCache =>
+      $$InstalledAppsCacheTableTableManager(_db, _db.installedAppsCache);
 }

@@ -1,6 +1,7 @@
 package com.example.ankiblock
 
 import android.app.AppOpsManager
+import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
@@ -12,6 +13,7 @@ import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.os.Process
 import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
@@ -23,15 +25,30 @@ import java.util.Calendar
 class MainActivity : FlutterActivity() {
     companion object {
         const val ACTION_OPEN_GATE = "com.ankiblock.OPEN_GATE"
+        const val ACTION_DISMISS_GATE = "com.ankiblock.DISMISS_GATE"
+
+        @Volatile
+        private var flutterEventChannel: MethodChannel? = null
+
+        fun notifyFlutter(method: String, arguments: Any?) {
+            flutterEventChannel?.invokeMethod(method, arguments)
+        }
     }
 
     private val channelName = "com.ankiblock/permissions"
     private val ankiDroidChannelName = "com.ankiblock/ankidroid"
-    private val mediaChannelName = "com.ankiblock/ankidroid_media"
     private var methodChannel: MethodChannel? = null
     private var pendingGate: Map<String, String>? = null
     private var ankiDroidApi: AnkiDroidApi? = null
-    private var mediaBridge: AnkiMediaBridge? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        if (intent?.action == ACTION_DISMISS_GATE) {
+            super.onCreate(savedInstanceState)
+            removeGateFromRecents()
+            return
+        }
+        super.onCreate(savedInstanceState)
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -40,8 +57,8 @@ class MainActivity : FlutterActivity() {
             channelName
         )
         methodChannel = ch
+        flutterEventChannel = ch
         registerAnkiDroidChannel(flutterEngine)
-        registerMediaChannel(flutterEngine)
         ch.setMethodCallHandler { call, result ->
             when (call.method) {
                 "hasUsageAccess" -> result.success(hasUsageAccess())
@@ -76,6 +93,13 @@ class MainActivity : FlutterActivity() {
                     val days = call.argument<Int>("days") ?: 7
                     result.success(getUsageStats(days))
                 }
+                "getTodayBlockedUsage" -> {
+                    @Suppress("UNCHECKED_CAST")
+                    val packages = (call.argument<List<*>>("packages") ?: emptyList<Any?>())
+                        .mapNotNull { it as? String }
+                    val focus = call.argument<String>("focusPackage")
+                    result.success(getTodayBlockedUsage(packages, focus))
+                }
                 "setBlockedPackages" -> {
                     val pkgs = (call.argument<List<String>>("packages") ?: emptyList())
                     val names = (call.argument<Map<String, String>>("names") ?: emptyMap())
@@ -109,6 +133,38 @@ class MainActivity : FlutterActivity() {
                     }
                     result.success(true)
                 }
+                "startDelegatedSession" -> {
+                    val pkg = call.argument<String>("packageName") ?: ""
+                    val appName = call.argument<String>("appName") ?: pkg
+                    val deckId = (call.argument<Number>("deckId"))?.toLong() ?: -1L
+                    val target = call.argument<Int>("target") ?: 5
+                    val baseline = call.argument<Int>("baseline") ?: 0
+                    @Suppress("UNCHECKED_CAST")
+                    val deckIds = (call.argument<List<*>>("deckIds") ?: emptyList<Any?>())
+                        .mapNotNull { (it as? Number)?.toLong() }
+                    AppMonitorService.startDelegatedSession(
+                        this,
+                        pkg,
+                        appName,
+                        deckId,
+                        deckIds,
+                        target,
+                        baseline,
+                    )
+                    val monitorIntent = Intent(this, AppMonitorService::class.java).apply {
+                        action = AppMonitorService.ACTION_DELEGATED_START
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(monitorIntent)
+                    } else {
+                        startService(monitorIntent)
+                    }
+                    result.success(true)
+                }
+                "cancelDelegatedSession" -> {
+                    AppMonitorService.cancelDelegatedSession(this)
+                    result.success(true)
+                }
                 "launchApp" -> {
                     val pkg = call.argument<String>("packageName") ?: ""
                     val launch = packageManager.getLaunchIntentForPackage(pkg)
@@ -131,8 +187,23 @@ class MainActivity : FlutterActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.action == ACTION_DISMISS_GATE) {
+            removeGateFromRecents()
+            return
+        }
         consumeGateIntent(intent)
         pendingGate?.let { notifyGateToFlutter(it) }
+    }
+
+    /** Drop the gate task from recents so it doesn't linger after unlock. */
+    private fun removeGateFromRecents() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            finishAndRemoveTask()
+        } else {
+            @Suppress("DEPRECATION")
+            finish()
+        }
     }
 
     private fun consumeGateIntent(intent: Intent?) {
@@ -211,6 +282,68 @@ class MainActivity : FlutterActivity() {
         return totals
     }
 
+    private fun startOfTodayMillis(): Long {
+        val cal = Calendar.getInstance()
+        cal.set(Calendar.HOUR_OF_DAY, 0)
+        cal.set(Calendar.MINUTE, 0)
+        cal.set(Calendar.SECOND, 0)
+        cal.set(Calendar.MILLISECOND, 0)
+        return cal.timeInMillis
+    }
+
+    /**
+     * Today's pickups (foreground launches) and screen time for [packages].
+     * Optionally highlights [focusPackage] (the app that triggered the gate).
+     */
+    private fun getTodayBlockedUsage(
+        packages: List<String>,
+        focusPackage: String?,
+    ): Map<String, Any> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP || packages.isEmpty()) {
+            return mapOf(
+                "totalPickups" to 0,
+                "totalScreenTimeMs" to 0L,
+                "focusPickups" to 0,
+                "focusScreenTimeMs" to 0L,
+            )
+        }
+        val packageSet = packages.toSet()
+        val start = startOfTodayMillis()
+        val end = System.currentTimeMillis()
+        val usm = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+
+        var totalScreenMs = 0L
+        val stats = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, start, end)
+            ?: emptyList()
+        var focusScreenMs = 0L
+        for (s in stats) {
+            if (s.packageName !in packageSet) continue
+            totalScreenMs += s.totalTimeInForeground
+            if (s.packageName == focusPackage) {
+                focusScreenMs += s.totalTimeInForeground
+            }
+        }
+
+        var totalPickups = 0
+        var focusPickups = 0
+        val events = usm.queryEvents(start, end)
+        val ev = UsageEvents.Event()
+        while (events.hasNextEvent()) {
+            events.getNextEvent(ev)
+            if (ev.eventType != UsageEvents.Event.MOVE_TO_FOREGROUND) continue
+            if (ev.packageName !in packageSet) continue
+            totalPickups++
+            if (ev.packageName == focusPackage) focusPickups++
+        }
+
+        return mapOf(
+            "totalPickups" to totalPickups,
+            "totalScreenTimeMs" to totalScreenMs,
+            "focusPickups" to focusPickups,
+            "focusScreenTimeMs" to focusScreenMs,
+        )
+    }
+
     /**
      * Sets up `com.ankiblock/ankidroid`, a MethodChannel that delegates each
      * call to [AnkiDroidApi]. We dispatch the blocking ContentProvider calls
@@ -230,67 +363,19 @@ class MainActivity : FlutterActivity() {
                     "hasPermission" -> result.success(api.hasPermission())
                     "requestPermission" -> api.requestPermission(result)
                     "openAnkiDroid" -> result.success(api.openAnkiDroid())
+                    "openAnkiDroidReviewer" -> {
+                        val deckId = (call.argument<Number>("deckId"))?.toLong()
+                        if (deckId == null) {
+                            result.error("BAD_ARGS", "deckId is required", null)
+                            return@setMethodCallHandler
+                        }
+                        result.success(api.openReviewer(deckId))
+                    }
                     "listDecks" -> {
                         Thread {
                             try {
                                 val decks = api.listDecks()
                                 runOnUiThread { result.success(decks) }
-                            } catch (e: AnkiDroidUnavailableException) {
-                                runOnUiThread {
-                                    result.error("UNAVAILABLE", e.message, null)
-                                }
-                            } catch (e: Exception) {
-                                runOnUiThread {
-                                    result.error("ANKIDROID_ERROR", e.message, null)
-                                }
-                            }
-                        }.start()
-                    }
-                    "getStudyableCards" -> {
-                        val deckId = (call.argument<Number>("deckId"))?.toLong()
-                        val limit = call.argument<Int>("limit") ?: 50
-                        if (deckId == null) {
-                            result.error("BAD_ARGS", "deckId is required", null)
-                            return@setMethodCallHandler
-                        }
-                        Thread {
-                            try {
-                                val cards = api.getStudyableCards(deckId, limit)
-                                runOnUiThread { result.success(cards) }
-                            } catch (e: AnkiDroidUnavailableException) {
-                                runOnUiThread {
-                                    result.error("UNAVAILABLE", e.message, null)
-                                }
-                            } catch (e: Exception) {
-                                runOnUiThread {
-                                    result.error("ANKIDROID_ERROR", e.message, null)
-                                }
-                            }
-                        }.start()
-                    }
-                    "answerCard" -> {
-                        val noteId = (call.argument<Number>("noteId"))?.toLong()
-                        val cardOrd = call.argument<Int>("cardOrd")
-                        val ease = call.argument<Int>("ease")
-                        val timeTakenMs =
-                            (call.argument<Number>("timeTakenMs"))?.toLong() ?: 0L
-                        if (noteId == null || cardOrd == null || ease == null) {
-                            result.error(
-                                "BAD_ARGS",
-                                "noteId, cardOrd, ease are required",
-                                null,
-                            )
-                            return@setMethodCallHandler
-                        }
-                        Thread {
-                            try {
-                                val ok = api.answerCard(
-                                    noteId,
-                                    cardOrd,
-                                    ease,
-                                    timeTakenMs,
-                                )
-                                runOnUiThread { result.success(ok) }
                             } catch (e: AnkiDroidUnavailableException) {
                                 runOnUiThread {
                                     result.error("UNAVAILABLE", e.message, null)
@@ -320,87 +405,6 @@ class MainActivity : FlutterActivity() {
             ?: false
         if (!handled) {
             super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        }
-    }
-
-    @Deprecated(
-        "Kept for the SAF folder-picker callback; FlutterActivity does not " +
-            "expose Activity Result APIs cleanly.",
-    )
-    @Suppress("DEPRECATION")
-    override fun onActivityResult(
-        requestCode: Int,
-        resultCode: Int,
-        data: Intent?,
-    ) {
-        val handled = mediaBridge?.onActivityResult(requestCode, resultCode, data)
-            ?: false
-        if (!handled) {
-            super.onActivityResult(requestCode, resultCode, data)
-        }
-    }
-
-    /**
-     * `com.ankiblock/ankidroid_media` MethodChannel — wraps [AnkiMediaBridge].
-     * Reads are dispatched to a worker thread because SAF lookups stat the
-     * filesystem.
-     */
-    private fun registerMediaChannel(flutterEngine: FlutterEngine) {
-        val bridge = AnkiMediaBridge(this)
-        mediaBridge = bridge
-        val channel = MethodChannel(
-            flutterEngine.dartExecutor.binaryMessenger,
-            mediaChannelName,
-        )
-        channel.setMethodCallHandler { call, result ->
-            when (call.method) {
-                "hasMediaAccess" -> result.success(bridge.hasMediaAccess())
-                "pickAnkiDroidFolder" -> bridge.pickAnkiDroidFolder(result)
-                "forgetFolder" -> {
-                    bridge.forgetFolder()
-                    result.success(true)
-                }
-                "getMediaBytes" -> {
-                    val filename = call.argument<String>("filename") ?: ""
-                    if (filename.isEmpty()) {
-                        result.success(null)
-                        return@setMethodCallHandler
-                    }
-                    Thread {
-                        val bytes = try {
-                            bridge.getMediaBytes(filename)
-                        } catch (_: Exception) {
-                            null
-                        }
-                        runOnUiThread { result.success(bytes) }
-                    }.start()
-                }
-                "getMediaDebugInfo" -> {
-                    Thread {
-                        val info = try {
-                            bridge.getMediaDebugInfo()
-                        } catch (_: Exception) {
-                            emptyMap<String, Any?>()
-                        }
-                        runOnUiThread { result.success(info) }
-                    }.start()
-                }
-                "probeMediaFiles" -> {
-                    @Suppress("UNCHECKED_CAST")
-                    val names =
-                        (call.argument<List<*>>("filenames") ?: emptyList<Any?>())
-                            .mapNotNull { it as? String }
-                    Thread {
-                        val probes = try {
-                            bridge.probeMediaFiles(names)
-                        } catch (_: Exception) {
-                            emptyList<Map<String, Any?>>()
-                        }
-                        runOnUiThread { result.success(probes) }
-                    }.start()
-                }
-                else -> result.notImplemented()
-            }
         }
     }
 

@@ -2,12 +2,37 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:drift/drift.dart' show Value;
 import 'package:flutter/services.dart';
+
+import '../database/database.dart';
 
 class GateRequest {
   final String packageName;
   final String appName;
   GateRequest(this.packageName, this.appName);
+}
+
+/// Today's pickups and screen time for blocked apps (from UsageStats).
+class TodayBlockedUsage {
+  final int totalPickups;
+  final Duration totalScreenTime;
+  final int focusPickups;
+  final Duration focusScreenTime;
+
+  const TodayBlockedUsage({
+    required this.totalPickups,
+    required this.totalScreenTime,
+    required this.focusPickups,
+    required this.focusScreenTime,
+  });
+
+  static const zero = TodayBlockedUsage(
+    totalPickups: 0,
+    totalScreenTime: Duration.zero,
+    focusPickups: 0,
+    focusScreenTime: Duration.zero,
+  );
 }
 
 class InstalledApp {
@@ -31,6 +56,27 @@ class InstalledApp {
         isSystem: isSystem,
         icon: icon,
         usage: usage ?? this.usage,
+      );
+}
+
+extension InstalledAppCacheX on InstalledApp {
+  InstalledAppsCacheCompanion toCacheCompanion() => InstalledAppsCacheCompanion(
+        packageName: Value(packageName),
+        displayName: Value(appName),
+        isSystem: Value(isSystem),
+        icon: Value(icon),
+        usageMs: Value(usage.inMilliseconds),
+        cachedAt: Value(DateTime.now().millisecondsSinceEpoch),
+      );
+}
+
+extension CachedInstalledAppX on CachedInstalledApp {
+  InstalledApp toInstalledApp() => InstalledApp(
+        packageName: packageName,
+        appName: displayName,
+        isSystem: isSystem,
+        icon: icon,
+        usage: Duration(milliseconds: usageMs),
       );
 }
 
@@ -72,6 +118,9 @@ class AppsService {
   final _gateController = StreamController<GateRequest>.broadcast();
   Stream<GateRequest> get gateRequests => _gateController.stream;
 
+  final _delegatedUnlockController = StreamController<int>.broadcast();
+  Stream<int> get delegatedUnlocks => _delegatedUnlockController.stream;
+
   Future<dynamic> _handleNativeCall(MethodCall call) async {
     if (call.method == 'openGate') {
       final args = Map<String, dynamic>.from(call.arguments as Map);
@@ -79,6 +128,10 @@ class AppsService {
         args['packageName'] as String? ?? '',
         args['appName'] as String? ?? '',
       ));
+    } else if (call.method == 'onDelegatedUnlock') {
+      final args = Map<String, dynamic>.from(call.arguments as Map);
+      final cards = (args['cardsCompleted'] as num?)?.toInt() ?? 0;
+      if (cards > 0) _delegatedUnlockController.add(cards);
     }
     return null;
   }
@@ -109,6 +162,32 @@ class AppsService {
     await _channel.invokeMethod('grantTempUnlock', {
       'packageName': packageName,
     });
+  }
+
+  /// Starts a delegated study session tracked by [AppMonitorService] while the
+  /// user reviews in AnkiDroid.
+  Future<void> startDelegatedSession({
+    required String packageName,
+    required String appName,
+    required int deckId,
+    required List<int> deckIds,
+    required int target,
+    required int baseline,
+  }) async {
+    if (!Platform.isAndroid) return;
+    await _channel.invokeMethod('startDelegatedSession', {
+      'packageName': packageName,
+      'appName': appName,
+      'deckId': deckId,
+      'deckIds': deckIds,
+      'target': target,
+      'baseline': baseline,
+    });
+  }
+
+  Future<void> cancelDelegatedSession() async {
+    if (!Platform.isAndroid) return;
+    await _channel.invokeMethod('cancelDelegatedSession');
   }
 
   Future<bool> launchApp(String packageName) async {
@@ -166,6 +245,34 @@ class AppsService {
       out[k as String] = Duration(milliseconds: ms);
     });
     return out;
+  }
+
+  /// Pickups and screen time today for [packages], with optional [focusPackage].
+  Future<TodayBlockedUsage> getTodayBlockedUsage({
+    required List<String> packages,
+    String? focusPackage,
+  }) async {
+    if (!Platform.isAndroid || packages.isEmpty) {
+      return TodayBlockedUsage.zero;
+    }
+    final raw = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+      'getTodayBlockedUsage',
+      {
+        'packages': packages,
+        if (focusPackage != null) 'focusPackage': focusPackage,
+      },
+    );
+    if (raw == null) return TodayBlockedUsage.zero;
+    return TodayBlockedUsage(
+      totalPickups: (raw['totalPickups'] as num?)?.toInt() ?? 0,
+      totalScreenTime: Duration(
+        milliseconds: (raw['totalScreenTimeMs'] as num?)?.toInt() ?? 0,
+      ),
+      focusPickups: (raw['focusPickups'] as num?)?.toInt() ?? 0,
+      focusScreenTime: Duration(
+        milliseconds: (raw['focusScreenTimeMs'] as num?)?.toInt() ?? 0,
+      ),
+    );
   }
 
   Future<List<InstalledApp>> listAppsWithUsage({int days = 7}) async {

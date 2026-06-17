@@ -1,7 +1,6 @@
 package com.example.ankiblock
 
 import android.app.Activity
-import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -16,17 +15,17 @@ import org.json.JSONArray
  *   - detect whether AnkiDroid is installed,
  *   - request the READ_WRITE_DATABASE runtime permission,
  *   - list decks with their (learn, review, new) counts,
- *   - pull due cards for a deck,
- *   - submit a review (ease + time taken) back to AnkiDroid.
- *
- * AnkiDroid then handles AnkiWeb sync, so this is also our piggyback path
- * to keep the user's collection in sync across devices.
+ *   - open AnkiDroid's native reviewer,
+ *   - poll schedule snapshots to track delegated-study progress.
  *
  * URIs / column names mirror `com.ichi2.anki.api.FlashCardsContract` — we
  * hard-code them rather than pulling in the AnkiDroid API AAR so the build
  * stays free of an extra Maven dependency.
  */
-class AnkiDroidApi(private val activity: Activity) {
+class AnkiDroidApi(private val context: Context) {
+
+    private val activity: Activity?
+        get() = context as? Activity
 
     companion object {
         const val PACKAGE_NAME = "com.ichi2.anki"
@@ -38,31 +37,18 @@ class AnkiDroidApi(private val activity: Activity) {
         val DECKS_URI: Uri = Uri.withAppendedPath(AUTHORITY_URI, "decks")
         val SCHEDULE_URI: Uri = Uri.withAppendedPath(AUTHORITY_URI, "schedule")
 
-        // Deck columns (names from FlashCardsContract.Deck — constant is DECK_COUNTS
-        // but the SQL column is literally "deck_count").
         private const val DECK_ID = "deck_id"
         private const val DECK_NAME = "deck_name"
         private const val DECK_COUNT = "deck_count"
 
-        // Schedule / ReviewInfo columns
         private const val NOTE_ID = "note_id"
         private const val CARD_ORD = "ord"
-        private const val BUTTON_COUNT = "button_count"
-        private const val NEXT_REVIEW_TIMES = "next_review_times"
-        private const val MEDIA_FILES = "media_files"
-        private const val QUESTION = "question"
-        private const val QUESTION_SIMPLE = "question_simple"
-        private const val ANSWER = "answer"
-        private const val ANSWER_SIMPLE = "answer_simple"
-        private const val ANSWER_PURE = "answer_pure"
-        private const val ANSWER_EASE = "answer_ease"
-        private const val TIME_TAKEN = "time_taken"
     }
 
     private var pendingPermissionResult: MethodChannel.Result? = null
 
     fun isInstalled(): Boolean {
-        val pm = activity.packageManager
+        val pm = context.packageManager
         return try {
             pm.getPackageInfo(PACKAGE_NAME, 0)
             true
@@ -72,17 +58,10 @@ class AnkiDroidApi(private val activity: Activity) {
     }
 
     fun hasPermission(): Boolean {
-        return ContextCompat.checkSelfPermission(activity, PERMISSION) ==
+        return ContextCompat.checkSelfPermission(context, PERMISSION) ==
             PackageManager.PERMISSION_GRANTED
     }
 
-    /**
-     * Triggers the OS permission prompt for [PERMISSION]. The Flutter caller's
-     * [MethodChannel.Result] is held until [onRequestPermissionsResult] fires.
-     *
-     * If the prompt is already in flight we fail-fast with an error so the
-     * UI can recover instead of leaking a dangling result.
-     */
     fun requestPermission(result: MethodChannel.Result) {
         if (!isInstalled()) {
             result.error("ANKIDROID_NOT_INSTALLED", "AnkiDroid is not installed", null)
@@ -100,9 +79,14 @@ class AnkiDroidApi(private val activity: Activity) {
             )
             return
         }
+        val act = activity
+        if (act == null) {
+            result.error("NO_ACTIVITY", "Permission request requires an Activity", null)
+            return
+        }
         pendingPermissionResult = result
         ActivityCompat.requestPermissions(
-            activity,
+            act,
             arrayOf(PERMISSION),
             PERMISSION_REQUEST_CODE,
         )
@@ -122,16 +106,11 @@ class AnkiDroidApi(private val activity: Activity) {
         return true
     }
 
-    /**
-     * Opens AnkiDroid (or its Play Store listing if not installed). Useful as
-     * a fallback when permission was denied "Don't ask again" — the user has
-     * to grant via system settings.
-     */
     fun openAnkiDroid(): Boolean {
-        val launch = activity.packageManager.getLaunchIntentForPackage(PACKAGE_NAME)
+        val launch = context.packageManager.getLaunchIntentForPackage(PACKAGE_NAME)
         return if (launch != null) {
             launch.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            activity.startActivity(launch)
+            context.startActivity(launch)
             true
         } else {
             try {
@@ -140,7 +119,7 @@ class AnkiDroidApi(private val activity: Activity) {
                     Uri.parse("market://details?id=$PACKAGE_NAME"),
                 )
                 market.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                activity.startActivity(market)
+                context.startActivity(market)
                 true
             } catch (_: Exception) {
                 false
@@ -148,16 +127,52 @@ class AnkiDroidApi(private val activity: Activity) {
         }
     }
 
-    /**
-     * Lists every deck in the user's AnkiDroid collection.
-     *
-     * `deck_counts` from the provider is a JSON array in the form
-     * `[learn, review, new]`. We split it into named fields so Dart never
-     * has to know the ordering.
-     */
+    fun openReviewer(deckId: Long): Boolean {
+        val intent = Intent().apply {
+            setClassName(PACKAGE_NAME, "com.ichi2.anki.Reviewer")
+            action = Intent.ACTION_VIEW
+            putExtra("deckId", deckId)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        return try {
+            context.startActivity(intent)
+            true
+        } catch (_: Throwable) {
+            openAnkiDroid()
+        }
+    }
+
+    fun scheduleCardKeys(deckId: Long, limit: Int): List<String> {
+        if (!hasPermission()) return emptyList()
+        val cr = context.contentResolver
+        val selection = "limit=?, deckID=?"
+        val args = arrayOf(limit.toString(), deckId.toString())
+        val keys = mutableListOf<String>()
+        cr.query(SCHEDULE_URI, null, selection, args, null)?.use { c ->
+            val noteIdIdx = columnIndex(c, NOTE_ID)
+            val cardOrdIdx = columnIndex(c, CARD_ORD, "card_ord")
+            while (c.moveToNext()) {
+                val noteId = if (noteIdIdx >= 0) c.getLong(noteIdIdx) else continue
+                val cardOrd = if (cardOrdIdx >= 0) c.getInt(cardOrdIdx) else 0
+                keys.add("$noteId:$cardOrd")
+            }
+        }
+        return keys.distinct()
+    }
+
+    fun countReviewedFromSnapshot(
+        deckId: Long,
+        initialKeys: List<String>,
+        pollLimit: Int,
+    ): Int {
+        if (initialKeys.isEmpty()) return 0
+        val current = scheduleCardKeys(deckId, pollLimit).toSet()
+        return initialKeys.count { it !in current }
+    }
+
     fun listDecks(): List<Map<String, Any?>> {
         requirePermissionOrThrow()
-        val cr = activity.contentResolver
+        val cr = context.contentResolver
         val out = mutableListOf<Map<String, Any?>>()
         cr.query(DECKS_URI, null, null, null, null)?.use { c ->
             val idIdx = c.getColumnIndex(DECK_ID)
@@ -196,88 +211,6 @@ class AnkiDroidApi(private val activity: Activity) {
         }
     }
 
-    /**
-     * Pulls up to [limit] cards that are currently studyable in [deckId].
-     * The schedule provider returns a mix of due reviews, learning steps,
-     * and new cards (subject to AnkiDroid's per-deck new-cards-per-day limit).
-     *
-     * `nextReviewTimes` is a JSON string array sized [buttonCount] —
-     * the human-readable interval previews for Again/Hard/Good/Easy.
-     */
-    fun getStudyableCards(deckId: Long, limit: Int): List<Map<String, Any?>> {
-        requirePermissionOrThrow()
-        val cr = activity.contentResolver
-        val selection = "limit=?, deckID=?"
-        val args = arrayOf(limit.toString(), deckId.toString())
-        val out = mutableListOf<Map<String, Any?>>()
-        cr.query(SCHEDULE_URI, null, selection, args, null)?.use { c ->
-            val noteIdIdx = columnIndex(c, NOTE_ID)
-            val cardOrdIdx = columnIndex(c, CARD_ORD, "card_ord")
-            val buttonCountIdx = columnIndex(c, BUTTON_COUNT)
-            val nextTimesIdx = columnIndex(c, NEXT_REVIEW_TIMES)
-            val mediaIdx = columnIndex(c, MEDIA_FILES)
-            while (c.moveToNext()) {
-                val noteId = if (noteIdIdx >= 0) c.getLong(noteIdIdx) else continue
-                val cardOrd = if (cardOrdIdx >= 0) c.getInt(cardOrdIdx) else 0
-                val buttonCount =
-                    if (buttonCountIdx >= 0) c.getInt(buttonCountIdx) else 4
-                val nextTimesRaw =
-                    if (nextTimesIdx >= 0) c.getString(nextTimesIdx) else null
-                val mediaRaw =
-                    if (mediaIdx >= 0) c.getString(mediaIdx) else null
-                val (question, answer) = fetchRenderedCard(noteId, cardOrd)
-                out.add(
-                    mapOf(
-                        "noteId" to noteId,
-                        "cardOrd" to cardOrd,
-                        "buttonCount" to buttonCount,
-                        "nextReviewTimes" to parseStringArray(nextTimesRaw),
-                        "mediaFiles" to parseStringArray(mediaRaw),
-                        "question" to question,
-                        "answer" to answer,
-                    ),
-                )
-            }
-        }
-        return out
-    }
-
-    /**
-     * ReviewInfo rows do not include rendered HTML — only ids and scheduling
-     * metadata. Pull question/answer from the NoteCard URI documented in
-     * FlashCardsContract: `notes/<noteId>/cards/<ord>`.
-     */
-    private fun fetchRenderedCard(noteId: Long, cardOrd: Int): Pair<String, String> {
-        val noteUri = Uri.withAppendedPath(
-            Uri.withAppendedPath(AUTHORITY_URI, "notes"),
-            noteId.toString(),
-        )
-        val cardsUri = Uri.withAppendedPath(noteUri, "cards")
-        val cardUri = Uri.withAppendedPath(cardsUri, cardOrd.toString())
-        val cr = activity.contentResolver
-        cr.query(cardUri, null, null, null, null)?.use { c ->
-            if (!c.moveToFirst()) return Pair("", "")
-            val q = firstNonBlank(c, QUESTION, QUESTION_SIMPLE) ?: ""
-            val a = firstNonBlank(c, ANSWER, ANSWER_PURE, ANSWER_SIMPLE) ?: ""
-            return Pair(q, a)
-        }
-        return Pair("", "")
-    }
-
-    /** First non-blank string among [names] columns, in priority order. */
-    private fun firstNonBlank(
-        cursor: android.database.Cursor,
-        vararg names: String,
-    ): String? {
-        for (name in names) {
-            val idx = cursor.getColumnIndex(name)
-            if (idx < 0) continue
-            val value = cursor.getString(idx)
-            if (!value.isNullOrBlank()) return value
-        }
-        return null
-    }
-
     private fun columnIndex(
         cursor: android.database.Cursor,
         vararg names: String,
@@ -287,37 +220,6 @@ class AnkiDroidApi(private val activity: Activity) {
             if (idx >= 0) return idx
         }
         return -1
-    }
-
-    private fun parseStringArray(raw: String?): List<String> {
-        if (raw.isNullOrBlank()) return emptyList()
-        return try {
-            val arr = JSONArray(raw)
-            (0 until arr.length()).map { arr.optString(it, "") }
-        } catch (_: Exception) {
-            emptyList()
-        }
-    }
-
-    /**
-     * Submits a review back to AnkiDroid. [ease] is 1..4 (Again, Hard, Good,
-     * Easy in 4-button mode; for 2/3-button cards AnkiDroid clamps).
-     * [timeTakenMs] is what we record as the user's reaction time.
-     *
-     * Cards are identified by `(noteId, cardOrd)` — AnkiDroid maps that pair
-     * to the canonical card id internally.
-     */
-    fun answerCard(noteId: Long, cardOrd: Int, ease: Int, timeTakenMs: Long): Boolean {
-        requirePermissionOrThrow()
-        val cr = activity.contentResolver
-        val values = ContentValues().apply {
-            put(NOTE_ID, noteId)
-            put(CARD_ORD, cardOrd)
-            put(ANSWER_EASE, ease)
-            put(TIME_TAKEN, timeTakenMs)
-        }
-        val updated = cr.update(SCHEDULE_URI, values, null, null)
-        return updated > 0
     }
 
     private fun requirePermissionOrThrow() {
