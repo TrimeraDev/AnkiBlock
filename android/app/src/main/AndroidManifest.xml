@@ -67,5 +67,9 @@
              installed via PackageManager. -->
         <package android:name="com.ichi2.anki" />
         <provider android:authorities="com.ichi2.anki.flashcards" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
     </queries>
 </manifest>

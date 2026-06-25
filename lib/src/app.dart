@@ -25,19 +25,39 @@ class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
   StreamSubscription<DelegatedSessionProgress>? _delegatedProgressSub;
   StreamSubscription<int>? _passiveStudySub;
   int _lastProgressCounted = 0;
+  bool _countNextResume = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrap());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_bootstrap());
+      unawaited(_recordAppOpen());
+    });
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      _countNextResume = true;
+    }
     if (state == AppLifecycleState.resumed) {
+      if (_countNextResume) {
+        _countNextResume = false;
+        unawaited(_recordAppOpen());
+      }
       ref.invalidate(blockingPermissionsProvider);
       unawaited(_onResume());
+    }
+  }
+
+  Future<void> _recordAppOpen() async {
+    final service = ref.read(supportPromptServiceProvider);
+    final count = await service.recordLaunch();
+    ref.read(appLaunchCountProvider.notifier).state = count;
+    if (await service.shouldShowPrompt(count)) {
+      ref.read(supportPromptVisibleProvider.notifier).state = true;
     }
   }
 
@@ -70,7 +90,7 @@ class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
       await db.incrementCardsReviewedBy(day, delta);
       await syncDailyGoalToNative(ref);
       ref.invalidate(dailyStatsProvider(day));
-      ref.invalidate(studyStreakProvider);
+      ref.invalidate(studyProgressProvider);
     });
 
     _passiveStudySub = svc.passiveStudyProgress.listen((delta) async {
@@ -78,7 +98,7 @@ class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
       final db = ref.read(databaseProvider);
       await db.incrementCardsReviewedBy(day, delta);
       ref.invalidate(dailyStatsProvider(day));
-      ref.invalidate(studyStreakProvider);
+      ref.invalidate(studyProgressProvider);
     });
 
     // Re-sync blocked list and start monitor on every cold start
@@ -137,7 +157,7 @@ class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
     await db.incrementUnlocksEarned(today);
     await syncDailyGoalToNative(ref);
     ref.invalidate(dailyStatsProvider(today));
-    ref.invalidate(studyStreakProvider);
+    ref.invalidate(studyProgressProvider);
     ref.invalidate(studyCountsProvider);
   }
 

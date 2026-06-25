@@ -54,7 +54,9 @@ class _BlockingScreenState extends ConsumerState<BlockingScreen> {
             onSelected: (m) => setState(() => _sort = m),
             itemBuilder: (_) => const [
               PopupMenuItem(
-                  value: _SortMode.usage, child: Text('Sort by usage')),
+                value: _SortMode.usage,
+                child: Text('Sort by screen time'),
+              ),
               PopupMenuItem(value: _SortMode.name, child: Text('Sort by name')),
             ],
           ),
@@ -315,8 +317,8 @@ class _BlockingLoadingBody extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             Text(
-              'Gathering installed apps, icons, and the last 7 days of screen '
-              'time. This can take a moment.',
+              'Gathering installed apps, icons, and this week\'s screen time. '
+              'This can take a moment.',
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -452,6 +454,7 @@ class _AppTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final usageText = _formatDuration(app.usage);
     final isSuggested = kSuggestedBlockPackages.contains(app.packageName);
     return ListTile(
@@ -479,11 +482,32 @@ class _AppTile extends StatelessWidget {
           ],
         ],
       ),
-      subtitle: Text(
-        '${app.packageName}\n$usageText (last 7d)',
+      subtitle: Text(app.packageName),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                usageText,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Text(
+                'this week',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(width: 8),
+          Switch(value: isBlocked, onChanged: onChanged),
+        ],
       ),
-      isThreeLine: true,
-      trailing: Switch(value: isBlocked, onChanged: onChanged),
     );
   }
 

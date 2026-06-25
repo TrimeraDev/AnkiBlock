@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/utils/study_day.dart';
 import '../../core/database/database.dart' as db;
+import '../../core/assets/app_assets.dart';
 import '../../core/di/providers.dart';
 import '../../core/services/ankidroid_service.dart';
 import '../../core/services/apps_service.dart';
@@ -13,7 +14,11 @@ import '../../core/services/study_scope_service.dart';
 import '../../core/setup/setup_actions.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/brand_widgets.dart';
+import '../../core/utils/deck_scope_format.dart';
+import '../../core/widgets/deck_picker_panel.dart';
 import '../../core/widgets/setup_panels.dart';
+import '../../core/widgets/support_prompt_banner.dart';
+import 'study_progress_sheet.dart';
 
 /// Home screen — study progress, your unlock rule, and today's wins.
 class TodayScreen extends ConsumerWidget {
@@ -41,6 +46,11 @@ class TodayScreen extends ConsumerWidget {
     final dailyComplete =
         isDailyGoalComplete(dailyGoal: dailyGoal, cardsReviewed: reviewed);
     final due = countsAsync.valueOrNull?.studyable ?? 0;
+    final decks = decksAsync.valueOrNull ?? const [];
+    final scope = scopeAsync.valueOrNull;
+    final hasDecksSelected = scope != null &&
+        decks.isNotEmpty &&
+        hasDecksInScope(scope, decks);
 
     return Scaffold(
       body: SafeArea(
@@ -51,7 +61,7 @@ class TodayScreen extends ConsumerWidget {
           onRefresh: () async {
             await mergeDailyFromNative(ref);
             ref.invalidate(dailyStatsProvider(studyDayKey()));
-            ref.invalidate(studyStreakProvider);
+            ref.invalidate(studyProgressProvider);
             ref.invalidate(studyCountsProvider);
             ref.invalidate(ankiDroidStatusProvider);
             ref.invalidate(ankiDroidDecksProvider);
@@ -64,7 +74,7 @@ class TodayScreen extends ConsumerWidget {
               Row(
                 children: [
                   Image.asset(
-                    'lib/src/assets/logo.png',
+                    AppAssets.logo,
                     width: 40,
                     height: 40,
                   ),
@@ -78,7 +88,10 @@ class TodayScreen extends ConsumerWidget {
                 ],
               ),
               const SizedBox(height: 8),
-              _StreakBanner(streakAsync: streakAsync),
+              StreakBanner(
+                streakAsync: streakAsync,
+                onTap: () => showStudyProgressSheet(context, ref),
+              ),
               const SizedBox(height: 20),
               _AnkiDroidStatusCard(ankiStatusAsync: ankiStatusAsync),
               _StudyHero(
@@ -89,7 +102,9 @@ class TodayScreen extends ConsumerWidget {
                 dailyRemaining: dailyRemaining,
                 unlockGoal: unlockGoal,
                 due: due,
+                hasDecksSelected: hasDecksSelected,
               ),
+              const SupportPromptBanner(),
               const SizedBox(height: 28),
               Text('Your setup', style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 4),
@@ -145,47 +160,6 @@ class TodayScreen extends ConsumerWidget {
   }
 }
 
-class _StreakBanner extends StatelessWidget {
-  final AsyncValue<int> streakAsync;
-
-  const _StreakBanner({required this.streakAsync});
-
-  @override
-  Widget build(BuildContext context) {
-    return streakAsync.when(
-      loading: () => const SizedBox.shrink(),
-      error: (_, __) => const SizedBox.shrink(),
-      data: (streak) {
-        final label = streak == 0
-            ? 'Hit your daily goal to start a streak'
-            : streak == 1
-                ? '1 day streak'
-                : '$streak day streak';
-        return Row(
-          children: [
-            Icon(
-              Icons.local_fire_department_rounded,
-              size: 20,
-              color: streak > 0 ? AppTheme.warning : AppTheme.onSurfaceVariant,
-            ),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: streak > 0
-                        ? AppTheme.warning
-                        : AppTheme.onSurfaceVariant,
-                    fontWeight:
-                        streak > 0 ? FontWeight.w600 : FontWeight.w500,
-                  ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
 class _StudyHero extends ConsumerStatefulWidget {
   final double progress;
   final bool dailyComplete;
@@ -194,6 +168,7 @@ class _StudyHero extends ConsumerStatefulWidget {
   final int dailyRemaining;
   final int unlockGoal;
   final int due;
+  final bool hasDecksSelected;
 
   const _StudyHero({
     required this.progress,
@@ -203,6 +178,7 @@ class _StudyHero extends ConsumerStatefulWidget {
     required this.dailyRemaining,
     required this.unlockGoal,
     required this.due,
+    required this.hasDecksSelected,
   });
 
   @override
@@ -254,6 +230,7 @@ class _StudyHeroState extends ConsumerState<_StudyHero> {
     final displayRemaining =
         hasSession ? sessionRemaining : widget.dailyRemaining;
     final hasCards = widget.due > 0;
+    final canStartStudy = hasCards && widget.hasDecksSelected;
 
     return BrandCard(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
@@ -321,7 +298,7 @@ class _StudyHeroState extends ConsumerState<_StudyHero> {
           ],
           const SizedBox(height: 16),
           GradientButton(
-            onPressed: hasCards && !_launching && !hasSession
+            onPressed: canStartStudy && !_launching && !hasSession
                 ? _openInAnkiDroid
                 : null,
             child: Row(
@@ -344,9 +321,11 @@ class _StudyHeroState extends ConsumerState<_StudyHero> {
                       ? 'Opening AnkiDroid…'
                       : hasSession
                           ? 'Studying in AnkiDroid…'
-                          : hasCards
-                              ? 'Start Studying · ${widget.due} due'
-                              : 'Nothing due right now',
+                          : !widget.hasDecksSelected
+                              ? 'Select decks to study'
+                              : hasCards
+                                  ? 'Start Studying · ${widget.due} due'
+                                  : 'Nothing due right now',
                 ),
               ],
             ),
@@ -544,12 +523,20 @@ class _StudyDecksSection extends StatelessWidget {
     final summary = scope == null || decks.isEmpty
         ? 'Connect AnkiDroid to choose decks'
         : formatDeckStudySummary(scope, decks);
+    final launchHint = scope == null || decks.isEmpty
+        ? ''
+        : formatLaunchDeckHint(scope, decks);
+    final subtitleParts = <String>[
+      summary,
+      if (due > 0) '$due due',
+      if (launchHint.isNotEmpty) launchHint,
+    ];
 
     return _SetupTile(
       icon: Icons.style_outlined,
       iconColor: AppTheme.success,
       title: 'Study decks',
-      subtitle: due > 0 ? '$summary · $due due' : summary,
+      subtitle: subtitleParts.join(' · '),
       onTap: () => _showDeckSheet(context),
     );
   }
@@ -579,11 +566,12 @@ class _StudyDecksSection extends StatelessWidget {
             Text('Study decks', style: Theme.of(ctx).textTheme.titleLarge),
             const SizedBox(height: 4),
             Text(
-              'Cards from these decks count toward unlocking apps.',
+              'Reviews from selected decks count — you can switch decks in '
+              'AnkiDroid.',
               style: Theme.of(ctx).textTheme.bodySmall,
             ),
             const SizedBox(height: 16),
-            const DeckStudySetupPanel(),
+            const DeckPickerPanel(),
           ],
         ),
       ),

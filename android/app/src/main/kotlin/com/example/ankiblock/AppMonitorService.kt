@@ -442,8 +442,20 @@ class AppMonitorService : Service() {
             nm.notify(NOTIFICATION_ID, buildNotification())
         }
 
-        ensurePassiveSnapshot(api, deckIds)
-        expandPassiveKeys(api, deckIds)
+        ensureMultiDeckSnapshot(
+            api,
+            deckIds,
+            KEY_PASSIVE_CARD_KEYS,
+            passiveKeyTrackers,
+            PASSIVE_SNAPSHOT_LIMIT,
+        )
+        expandMultiDeckKeys(
+            api,
+            deckIds,
+            KEY_PASSIVE_CARD_KEYS,
+            passiveKeyTrackers,
+            PASSIVE_SNAPSHOT_LIMIT,
+        )
 
         val keys = prefs.getString(KEY_PASSIVE_CARD_KEYS, null)
             ?.split(",")
@@ -527,44 +539,80 @@ class AppMonitorService : Service() {
         }
     }
 
-    private fun ensurePassiveSnapshot(api: AnkiDroidApi, deckIds: List<Long>) {
-        val existing = prefs.getString(KEY_PASSIVE_CARD_KEYS, null)
+    private fun resolveDelegatedDeckIds(): List<Long> {
+        val fromCsv = parseDelegatedDeckIds(
+            prefs.getString(KEY_DELEGATED_DECK_IDS, null),
+        ).toList()
+        if (fromCsv.isNotEmpty()) return fromCsv
+        val launchDeck = prefs.getLong(KEY_DELEGATED_DECK_ID, -1L)
+        if (launchDeck >= 0) return listOf(launchDeck)
+        return emptyList()
+    }
+
+    private fun aggregateDeckDueTotal(api: AnkiDroidApi, deckIds: List<Long>): Int {
+        var total = 0
+        for (deckId in deckIds) {
+            total += try {
+                api.deckDueTotal(deckId)
+            } catch (e: Exception) {
+                Log.w(TAG, "due-count for deck=$deckId failed", e)
+                0
+            }
+        }
+        return total
+    }
+
+    private fun ensureMultiDeckSnapshot(
+        api: AnkiDroidApi,
+        deckIds: List<Long>,
+        keysPrefKey: String,
+        trackers: MutableMap<String, AnkiDroidApi.KeyTracker>,
+        perDeckLimit: Int,
+    ) {
+        val existing = prefs.getString(keysPrefKey, null)
         if (!existing.isNullOrBlank()) {
-            if (passiveKeyTrackers.isEmpty()) {
+            if (trackers.isEmpty()) {
                 seedTrackers(
                     api,
                     existing.split(",").filter { it.isNotBlank() },
-                    passiveKeyTrackers,
+                    trackers,
                 )
             }
             return
         }
         val keys = linkedSetOf<String>()
         for (deckId in deckIds) {
-            keys.addAll(api.scheduleCardKeys(deckId, PASSIVE_SNAPSHOT_LIMIT))
+            keys.addAll(api.scheduleCardKeys(deckId, perDeckLimit))
         }
         if (keys.isEmpty()) return
-        seedTrackers(api, keys.toList(), passiveKeyTrackers)
+        seedTrackers(api, keys.toList(), trackers)
         prefs.edit()
-            .putString(KEY_PASSIVE_CARD_KEYS, keys.joinToString(","))
+            .putString(keysPrefKey, keys.joinToString(","))
             .apply()
-        Log.i(TAG, "passive snapshot decks=$deckIds keys=${keys.size}")
+        Log.i(TAG, "multi-deck snapshot decks=$deckIds keys=${keys.size}")
     }
 
-    private fun expandPassiveKeys(api: AnkiDroidApi, deckIds: List<Long>) {
-        val raw = prefs.getString(KEY_PASSIVE_CARD_KEYS, null) ?: return
+    private fun expandMultiDeckKeys(
+        api: AnkiDroidApi,
+        deckIds: List<Long>,
+        keysPrefKey: String,
+        trackers: MutableMap<String, AnkiDroidApi.KeyTracker>,
+        perDeckLimit: Int,
+    ) {
+        val raw = prefs.getString(keysPrefKey, null) ?: return
         val tracked = raw.split(",").filter { it.isNotBlank() }.toMutableSet()
         val fresh = linkedSetOf<String>()
         for (deckId in deckIds) {
-            fresh.addAll(api.scheduleCardKeys(deckId, PASSIVE_SNAPSHOT_LIMIT))
+            fresh.addAll(api.scheduleCardKeys(deckId, perDeckLimit))
         }
         val added = fresh - tracked
         if (added.isEmpty()) return
         tracked.addAll(added)
-        seedTrackers(api, added.toList(), passiveKeyTrackers, clearExisting = false)
+        seedTrackers(api, added.toList(), trackers, clearExisting = false)
         prefs.edit()
-            .putString(KEY_PASSIVE_CARD_KEYS, tracked.joinToString(","))
+            .putString(keysPrefKey, tracked.joinToString(","))
             .apply()
+        Log.d(TAG, "expanded multi-deck snapshot +${added.size} keys (total ${tracked.size})")
     }
 
     private fun checkDelegatedProgress(foreground: String?) {
@@ -595,8 +643,8 @@ class AppMonitorService : Service() {
         val appName = prefs.getString(KEY_DELEGATED_APP_NAME, pkg) ?: pkg
         val target = prefs.getInt(KEY_DELEGATED_TARGET, 5)
         val baseline = prefs.getInt(KEY_DELEGATED_BASELINE, 0)
-        val deckId = prefs.getLong(KEY_DELEGATED_DECK_ID, -1L)
-        if (deckId < 0) return
+        val deckIds = resolveDelegatedDeckIds()
+        if (deckIds.isEmpty()) return
 
         val api = ankiApi ?: return
         if (!api.hasPermission()) {
@@ -604,8 +652,20 @@ class AppMonitorService : Service() {
             return
         }
 
-        ensureSessionSnapshot(api, deckId, target)
-        expandTrackedKeys(api, deckId, target)
+        ensureMultiDeckSnapshot(
+            api,
+            deckIds,
+            KEY_DELEGATED_CARD_KEYS,
+            keyTrackers,
+            PASSIVE_SNAPSHOT_LIMIT,
+        )
+        expandMultiDeckKeys(
+            api,
+            deckIds,
+            KEY_DELEGATED_CARD_KEYS,
+            keyTrackers,
+            PASSIVE_SNAPSHOT_LIMIT,
+        )
 
         val initialKeys = prefs.getString(KEY_DELEGATED_CARD_KEYS, null)
             ?.split(",")
@@ -624,7 +684,7 @@ class AppMonitorService : Service() {
         }
 
         val currentDue = try {
-            api.deckDueTotal(deckId)
+            aggregateDeckDueTotal(api, deckIds)
         } catch (e: Exception) {
             Log.w(TAG, "due-count poll failed", e)
             baseline
@@ -644,7 +704,8 @@ class AppMonitorService : Service() {
         Log.d(
             TAG,
             "poll fg=$activePkg completed=$completed/$target (reps=$repsBased due=$dueBased) " +
-                "streak=$streak snapshot=${initialKeys.size} keys baseline=$baseline now=$currentDue",
+                "streak=$streak snapshot=${initialKeys.size} keys baseline=$baseline now=$currentDue " +
+                "decks=$deckIds",
         )
 
         if (completed < target) return
@@ -670,39 +731,6 @@ class AppMonitorService : Service() {
             cardsCompleted = completed,
             onDismiss = { },
         )
-    }
-
-    /** Capture the first N schedule cards once AnkiDroid is in the foreground. */
-    private fun ensureSessionSnapshot(api: AnkiDroidApi, deckId: Long, target: Int) {
-        val existing = prefs.getString(KEY_DELEGATED_CARD_KEYS, null)
-        if (!existing.isNullOrBlank()) {
-            if (keyTrackers.isEmpty()) {
-                seedTrackers(api, existing.split(",").filter { it.isNotBlank() })
-            }
-            return
-        }
-        val keys = api.scheduleCardKeys(deckId, target)
-        if (keys.isEmpty()) return
-        seedTrackers(api, keys)
-        prefs.edit()
-            .putString(KEY_DELEGATED_CARD_KEYS, keys.joinToString(","))
-            .apply()
-        Log.i(TAG, "schedule snapshot deck=$deckId keys=$keys")
-    }
-
-    /** Pull newly-due cards into the tracked set as the user studies. */
-    private fun expandTrackedKeys(api: AnkiDroidApi, deckId: Long, target: Int) {
-        val raw = prefs.getString(KEY_DELEGATED_CARD_KEYS, null) ?: return
-        val tracked = raw.split(",").filter { it.isNotBlank() }.toMutableSet()
-        val fresh = api.scheduleCardKeys(deckId, target).toSet()
-        val added = fresh - tracked
-        if (added.isEmpty()) return
-        tracked.addAll(added)
-        seedTrackers(api, added.toList(), clearExisting = false)
-        prefs.edit()
-            .putString(KEY_DELEGATED_CARD_KEYS, tracked.joinToString(","))
-            .apply()
-        Log.d(TAG, "expanded snapshot +${added.size} keys (total ${tracked.size})")
     }
 
     private fun seedTrackers(

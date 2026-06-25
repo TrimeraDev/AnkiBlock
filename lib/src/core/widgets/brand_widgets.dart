@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../theme/app_theme.dart';
 
@@ -298,6 +299,83 @@ class BrandBadge extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Fire icon + consecutive daily-goal streak label.
+class StreakBanner extends StatelessWidget {
+  final AsyncValue<int> streakAsync;
+  final bool center;
+  final VoidCallback? onTap;
+
+  const StreakBanner({
+    super.key,
+    required this.streakAsync,
+    this.center = false,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return streakAsync.when(
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (streak) {
+        final label = streak == 0
+            ? 'Hit your daily goal to start a streak'
+            : streak == 1
+                ? '1 day streak'
+                : '$streak day streak';
+        final content = Row(
+          mainAxisAlignment:
+              center ? MainAxisAlignment.center : MainAxisAlignment.start,
+          mainAxisSize: center ? MainAxisSize.min : MainAxisSize.max,
+          children: [
+            Icon(
+              Icons.local_fire_department_rounded,
+              size: 20,
+              color: streak > 0 ? AppTheme.warning : AppTheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                label,
+                textAlign: center ? TextAlign.center : TextAlign.start,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: streak > 0
+                          ? AppTheme.warning
+                          : AppTheme.onSurfaceVariant,
+                      fontWeight:
+                          streak > 0 ? FontWeight.w600 : FontWeight.w500,
+                    ),
+              ),
+            ),
+            if (onTap != null) ...[
+              const SizedBox(width: 4),
+              const Icon(
+                Icons.chevron_right,
+                size: 20,
+                color: AppTheme.onSurfaceVariant,
+              ),
+            ],
+          ],
+        );
+
+        if (onTap == null) return content;
+
+        return Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: content,
+            ),
+          ),
+        );
+      },
     );
   }
 }

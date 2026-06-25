@@ -90,8 +90,14 @@ class MainActivity : FlutterActivity() {
                     result.success(getInstalledApps(includeIcons))
                 }
                 "getUsageStats" -> {
-                    val days = call.argument<Int>("days") ?: 7
-                    result.success(getUsageStats(days))
+                    val thisWeek = call.argument<Boolean>("thisWeek") ?: false
+                    if (thisWeek) {
+                        val end = System.currentTimeMillis()
+                        result.success(getUsageStatsSince(startOfWeekMillis(), end))
+                    } else {
+                        val days = call.argument<Int>("days") ?: 7
+                        result.success(getUsageStats(days))
+                    }
                 }
                 "getTodayBlockedUsage" -> {
                     @Suppress("UNCHECKED_CAST")
@@ -287,13 +293,16 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun getUsageStats(days: Int): Map<String, Long> {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return emptyMap()
-        val usm = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
         val end = System.currentTimeMillis()
         val cal = Calendar.getInstance()
         cal.timeInMillis = end
         cal.add(Calendar.DAY_OF_YEAR, -days)
-        val start = cal.timeInMillis
+        return getUsageStatsSince(cal.timeInMillis, end)
+    }
+
+    private fun getUsageStatsSince(start: Long, end: Long): Map<String, Long> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return emptyMap()
+        val usm = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
         val stats = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, start, end)
             ?: return emptyMap()
         val totals = HashMap<String, Long>()
@@ -302,6 +311,16 @@ class MainActivity : FlutterActivity() {
             totals[s.packageName] = prev + s.totalTimeInForeground
         }
         return totals
+    }
+
+    private fun startOfWeekMillis(): Long {
+        val cal = Calendar.getInstance()
+        cal.set(Calendar.HOUR_OF_DAY, 0)
+        cal.set(Calendar.MINUTE, 0)
+        cal.set(Calendar.SECOND, 0)
+        cal.set(Calendar.MILLISECOND, 0)
+        cal.set(Calendar.DAY_OF_WEEK, cal.firstDayOfWeek)
+        return cal.timeInMillis
     }
 
     private fun startOfTodayMillis(): Long {

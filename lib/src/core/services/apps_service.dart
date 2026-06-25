@@ -324,11 +324,17 @@ class AppsService {
     }).toList();
   }
 
-  Future<Map<String, Duration>> getUsageStats({int days = 7}) async {
+  Future<Map<String, Duration>> getUsageStats({
+    int days = 7,
+    bool thisWeek = false,
+  }) async {
     if (!Platform.isAndroid) return const {};
     final raw = await _channel.invokeMethod<Map<dynamic, dynamic>>(
       'getUsageStats',
-      {'days': days},
+      {
+        'days': days,
+        'thisWeek': thisWeek,
+      },
     );
     if (raw == null) return const {};
     final out = <String, Duration>{};
@@ -367,9 +373,9 @@ class AppsService {
     );
   }
 
-  Future<List<InstalledApp>> listAppsWithUsage({int days = 7}) async {
+  Future<List<InstalledApp>> listAppsWithUsage({bool thisWeek = true}) async {
     final apps = await listInstalledApps();
-    final usage = await getUsageStats(days: days);
+    final usage = await getUsageStats(thisWeek: thisWeek);
     return apps
         .map((a) => a.copyWith(usage: usage[a.packageName] ?? Duration.zero))
         .toList();

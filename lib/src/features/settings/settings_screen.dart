@@ -4,8 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/database/database.dart';
+import '../../core/constants/support_links.dart';
 import '../../core/di/providers.dart';
 import '../../core/setup/setup_actions.dart';
+import '../../core/support/support_actions.dart';
 import '../../core/theme/app_theme.dart';
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -130,11 +132,94 @@ class SettingsScreen extends ConsumerWidget {
           },
         ),
         const Divider(),
+        const _SectionHeader(label: 'Support'),
+        ListTile(
+          leading: const Icon(Icons.star_outline),
+          title: const Text('Rate AnkiBlock'),
+          subtitle: const Text('In-app Google Play review when available'),
+          onTap: () => openSupportLink(
+            context,
+            ref,
+            (a) => a.requestAppReview(),
+          ),
+        ),
+        ListTile(
+          leading: const Icon(Icons.local_cafe_outlined),
+          title: const Text('Tip on Ko-fi'),
+          subtitle: const Text('Optional personal tip to the developer'),
+          onTap: () => openSupportLink(context, ref, (a) => a.openKofi()),
+        ),
+        ListTile(
+          leading: const Icon(Icons.volunteer_activism_outlined),
+          title: const Text('Tip on PayPal'),
+          subtitle: const Text('paypal.me/trimera'),
+          onTap: () => openSupportLink(context, ref, (a) => a.openPayPal()),
+        ),
+        ListTile(
+          leading: const Icon(Icons.language),
+          title: const Text('Website & privacy'),
+          subtitle: const Text('Project info, privacy policy, imprint'),
+          onTap: () => openSupportLink(context, ref, (a) => a.openWebsite()),
+        ),
+        const Divider(),
         const _SectionHeader(label: 'About'),
-        const ListTile(
-          leading: Icon(Icons.info_outline),
-          title: Text('AnkiBlock'),
-          subtitle: Text('1.0.0'),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.info_outline, color: AppTheme.onSurfaceVariant),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'AnkiBlock',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        Text(
+                          'Version 1.0.0',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'AnkiBlock is an open-source side project — entirely free, with '
+                'no ads and no commercial intent. Simon & Vincent UG is the '
+                'Play Store publisher for legal reasons only.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Questions or feedback?',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              InkWell(
+                onTap: () => openSupportLink(
+                  context,
+                  ref,
+                  (a) => a.openEmail(),
+                ),
+                borderRadius: BorderRadius.circular(4),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Text(
+                    SupportLinks.contactEmail,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: AppTheme.accent,
+                        ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ],
     );

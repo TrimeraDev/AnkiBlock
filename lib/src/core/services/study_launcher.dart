@@ -7,8 +7,11 @@ import 'apps_service.dart';
 import 'study_scope_service.dart';
 import '../utils/study_day.dart';
 
-/// Picks which AnkiDroid deck to open for study given the user's scope.
-int resolveStudyDeckId(
+/// Picks which AnkiDroid deck to open when starting a study session.
+///
+/// This is the launch deck only — delegated tracking counts reps from all
+/// decks in [allowedIds], not just the returned deck.
+int resolveLaunchDeckId(
   StudyScope scope,
   List<AnkiDroidDeck> decks,
   List<int> allowedIds,
@@ -64,8 +67,10 @@ Future<bool> startScopedStudySession({
   final allowedIds = scope.filterDeckIds(decks.map((d) => d.id));
   if (allowedIds.isEmpty) return false;
 
-  final deckId = resolveStudyDeckId(scope, decks, allowedIds);
-  final deck = decks.firstWhere((d) => d.id == deckId);
+  final launchDeckId = resolveLaunchDeckId(scope, decks, allowedIds);
+  final baseline = decks
+      .where((d) => allowedIds.contains(d.id))
+      .fold(0, (sum, d) => sum + d.totalDue);
   final apps = ref.read(appsServiceProvider);
   final anki = ref.read(ankiDroidServiceProvider);
 
@@ -82,12 +87,12 @@ Future<bool> startScopedStudySession({
   await apps.startDelegatedSession(
     packageName: unlockPackageName ?? kPracticeStudyPackage,
     appName: unlockAppName ?? 'Study',
-    deckId: deckId,
+    deckId: launchDeckId,
     deckIds: allowedIds,
     target: target,
-    baseline: deck.totalDue,
+    baseline: baseline,
   );
-  return anki.openAnkiDroidReviewer(deckId);
+  return anki.openAnkiDroidReviewer(launchDeckId);
 }
 
 /// Opens AnkiDroid without starting a tracked session (legacy).
@@ -98,6 +103,6 @@ Future<bool> openScopedAnkiDroidReviewer({
 }) async {
   final allowedIds = scope.filterDeckIds(decks.map((d) => d.id));
   if (allowedIds.isEmpty) return false;
-  final deckId = resolveStudyDeckId(scope, decks, allowedIds);
-  return anki.openAnkiDroidReviewer(deckId);
+  final launchDeckId = resolveLaunchDeckId(scope, decks, allowedIds);
+  return anki.openAnkiDroidReviewer(launchDeckId);
 }

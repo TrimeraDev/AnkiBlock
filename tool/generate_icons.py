@@ -8,11 +8,14 @@ from __future__ import annotations
 from collections import deque
 from pathlib import Path
 
-from PIL import Image, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]
 LOGO_PATH = ROOT / "lib" / "src" / "assets" / "logo.png"
 BG = (8, 16, 32, 255)  # #081020
+ICON_PADDING_RATIO = 0.20
+WORDMARK_PRIMARY = (37, 99, 235, 255)  # #2563EB
+WORDMARK_ON = (255, 255, 255, 255)
 
 
 def _is_outer_background(rgb: tuple[int, int, int]) -> bool:
@@ -82,7 +85,7 @@ def prepare_logo() -> Image.Image:
 logo = prepare_logo()
 
 
-def compose(size: int, padding_ratio: float = 0.12) -> Image.Image:
+def compose(size: int, padding_ratio: float = ICON_PADDING_RATIO) -> Image.Image:
     canvas = Image.new("RGBA", (size, size), BG)
     inner = int(size * (1 - 2 * padding_ratio))
     scaled = logo.resize((inner, inner), Image.Resampling.LANCZOS)
@@ -91,7 +94,7 @@ def compose(size: int, padding_ratio: float = 0.12) -> Image.Image:
     return canvas.convert("RGB")
 
 
-def foreground(size: int, padding_ratio: float = 0.12) -> Image.Image:
+def foreground(size: int, padding_ratio: float = ICON_PADDING_RATIO) -> Image.Image:
     canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     inner = int(size * (1 - 2 * padding_ratio))
     scaled = logo.resize((inner, inner), Image.Resampling.LANCZOS)
@@ -103,6 +106,47 @@ def foreground(size: int, padding_ratio: float = 0.12) -> Image.Image:
 def save_png(img: Image.Image, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     img.save(path, "PNG")
+
+
+def load_bold_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    candidates = [
+        Path("C:/Windows/Fonts/segoeuib.ttf"),
+        Path("C:/Windows/Fonts/arialbd.ttf"),
+        Path("/System/Library/Fonts/Supplemental/Arial Bold.ttf"),
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return ImageFont.truetype(str(candidate), size)
+    return ImageFont.load_default()
+
+
+def generate_splash_mark(logo_width: int = 192) -> Image.Image:
+    """Logo with AnkiBlock wordmark for native launch screens."""
+    gap = max(16, logo_width // 8)
+    font_size = max(28, logo_width // 4)
+    font = load_bold_font(font_size)
+
+    scaled_logo = logo.resize((logo_width, logo_width), Image.Resampling.LANCZOS)
+    draw_probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    anki_width = int(draw_probe.textlength("Anki", font=font))
+    block_width = int(draw_probe.textlength("Block", font=font))
+    text_width = anki_width + block_width
+    text_height = font_size + 8
+
+    width = max(logo_width, text_width) + 32
+    height = logo_width + gap + text_height + 16
+    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+
+    logo_x = (width - logo_width) // 2
+    canvas.paste(scaled_logo, (logo_x, 0), scaled_logo)
+
+    text_y = logo_width + gap
+    text_x = (width - text_width) // 2
+    draw = ImageDraw.Draw(canvas)
+    draw.text((text_x, text_y), "Anki", font=font, fill=WORDMARK_ON)
+    draw.text((text_x + anki_width, text_y), "Block", font=font, fill=WORDMARK_PRIMARY)
+    return canvas
 
 
 android_launcher = {
@@ -128,6 +172,7 @@ for folder, size in android_foreground.items():
     save_png(foreground(size), res / folder / "ic_launcher_foreground.png")
 
 save_png(compose(256), res / "drawable-nodpi" / "ic_logo.png")
+save_png(generate_splash_mark(192), res / "drawable-nodpi" / "ic_splash.png")
 
 ios_icons = {
     "Icon-App-20x20@1x.png": 20,
@@ -150,12 +195,22 @@ ios_dir = ROOT / "ios" / "Runner" / "Assets.xcassets" / "AppIcon.appiconset"
 for name, size in ios_icons.items():
     save_png(compose(size), ios_dir / name)
 
-# Website asset: cutout PNG on transparent background (site bg is also #081020).
+# Transparent cutout for Flutter UI and website (bg is #081020 in both).
+flutter_logo = ROOT / "lib" / "src" / "assets" / "logo_transparent.png"
 docs_logo = ROOT / "docs" / "assets" / "logo.png"
+save_png(logo, flutter_logo)
 save_png(logo, docs_logo)
+
+ios_launch = ROOT / "ios" / "Runner" / "Assets.xcassets" / "LaunchImage.imageset"
+for name, logo_width in {
+    "LaunchImage.png": 192,
+    "LaunchImage@2x.png": 384,
+    "LaunchImage@3x.png": 576,
+}.items():
+    save_png(generate_splash_mark(logo_width), ios_launch / name)
 
 print(
     "Generated",
-    len(android_launcher) + len(android_foreground) + len(ios_icons) + 2,
+    len(android_launcher) + len(android_foreground) + len(ios_icons) + 4,
     "icons/assets",
 )

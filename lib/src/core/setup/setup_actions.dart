@@ -65,7 +65,7 @@ Future<void> mergeDailyFromNative(WidgetRef ref) async {
   if (native.cardsReviewed > dbCount) {
     await db.setCardsReviewedForDay(day, native.cardsReviewed);
     ref.invalidate(dailyStatsProvider(day));
-    ref.invalidate(studyStreakProvider);
+    ref.invalidate(studyProgressProvider);
     await syncDailyGoalToNative(ref);
   }
 }

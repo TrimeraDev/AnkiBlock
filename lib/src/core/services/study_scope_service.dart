@@ -91,7 +91,7 @@ class StudyScopeService {
 
   Future<StudyScope> load() async {
     final prefs = await SharedPreferences.getInstance();
-    final mode = StudyScopeModeX.fromStorageKey(prefs.getString(_kMode));
+    var mode = StudyScopeModeX.fromStorageKey(prefs.getString(_kMode));
     final disabledJson = prefs.getString(_kDisabledDeckIds);
     final disabled = <int>{};
     if (disabledJson != null && disabledJson.isNotEmpty) {
@@ -103,6 +103,14 @@ class StudyScopeService {
       }
     }
     final active = prefs.getInt(_kActiveDeckId);
+
+    // "All" is equivalent to multi with every deck enabled — normalize once.
+    if (mode == StudyScopeMode.all) {
+      mode = StudyScopeMode.multi;
+      await prefs.setString(_kMode, StudyScopeMode.multi.storageKey);
+      await prefs.setString(_kDisabledDeckIds, jsonEncode(<int>[]));
+    }
+
     return StudyScope(
       mode: mode,
       disabledDeckIds: disabled,
@@ -134,5 +142,23 @@ class StudyScopeService {
     } else {
       await prefs.setInt(_kActiveDeckId, deckId);
     }
+  }
+
+  Future<void> enableAll() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kDisabledDeckIds, jsonEncode(<int>[]));
+  }
+
+  Future<void> disableAll(Iterable<int> allDeckIds) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _kDisabledDeckIds,
+      jsonEncode(allDeckIds.toList()),
+    );
+  }
+
+  Future<void> setDisabledDeckIds(Set<int> ids) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kDisabledDeckIds, jsonEncode(ids.toList()));
   }
 }

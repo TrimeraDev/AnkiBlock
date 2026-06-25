@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/assets/app_assets.dart';
 import '../../core/di/providers.dart';
 import '../../core/services/ankidroid_service.dart';
 import '../../core/services/apps_service.dart';
 import '../../core/services/study_launcher.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/deck_scope_format.dart';
 import '../../core/utils/study_day.dart';
 import '../../core/widgets/brand_widgets.dart';
 
@@ -43,7 +45,7 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen> {
     final today = studyDayKey();
     await ref.read(databaseProvider).incrementBlockedAttempts(today);
     ref.invalidate(dailyStatsProvider(today));
-    ref.invalidate(studyStreakProvider);
+    ref.invalidate(studyProgressProvider);
   }
 
   Future<void> _maybeAutoLaunch() async {
@@ -92,15 +94,23 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen> {
     final ruleAsync = ref.watch(blockRuleProvider);
     final countsAsync = ref.watch(studyCountsProvider);
     final ankiStatusAsync = ref.watch(ankiDroidStatusProvider);
+    final decksAsync = ref.watch(ankiDroidDecksProvider);
+    final scopeAsync = ref.watch(studyScopeProvider);
     final usageAsync = ref.watch(gateTodayUsageProvider(widget.packageName));
     final today = studyDayKey();
     final dailyStatsAsync = ref.watch(dailyStatsProvider(today));
+    final streakAsync = ref.watch(studyStreakProvider);
 
     final unlockGoal = ruleAsync.valueOrNull?.cardsRequired ?? 10;
     final dailyGoal = ruleAsync.valueOrNull?.dailyCardsGoal ?? 30;
     final counts = countsAsync.valueOrNull ?? AnkiDroidCounts.zero;
     final ankiReady = ankiStatusAsync.valueOrNull?.isReady ?? false;
     final available = counts.studyable;
+    final decks = decksAsync.valueOrNull ?? const [];
+    final scope = scopeAsync.valueOrNull;
+    final hasDecksSelected = scope != null &&
+        decks.isNotEmpty &&
+        hasDecksInScope(scope, decks);
     final usage = usageAsync.valueOrNull ?? TodayBlockedUsage.zero;
     final reviewed = dailyStatsAsync.valueOrNull?.cardsReviewed ?? 0;
     final dailyComplete =
@@ -111,7 +121,7 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen> {
         : 0.0;
     final remaining = dailyComplete ? 0 : unlockGoal;
 
-    final canStudy = ankiReady && available > 0;
+    final canStudy = ankiReady && available > 0 && hasDecksSelected;
 
     return PopScope(
       canPop: false,
@@ -131,7 +141,7 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen> {
                     size: 120,
                     strokeWidth: 8,
                     child: Image.asset(
-                      'lib/src/assets/logo.png',
+                      AppAssets.logo,
                       width: 56,
                       height: 56,
                     ),
@@ -150,6 +160,8 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen> {
                   before: dailyComplete ? 'Daily goal done. ' : 'Study first. ',
                   accent: dailyComplete ? 'Enjoy.' : 'Unlock later.',
                 ),
+                const SizedBox(height: 10),
+                StreakBanner(streakAsync: streakAsync, center: true),
                 const SizedBox(height: 12),
                 if (!usageAsync.isLoading)
                   Text(
@@ -188,8 +200,8 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen> {
                         dailyComplete
                             ? 'You finished your daily goal. All blocked apps '
                                 'are open for the rest of the study day.'
-                            : 'Study $unlockGoal cards in AnkiDroid to open '
-                                '${widget.appName}. '
+                            : 'Study $unlockGoal cards from your selected decks '
+                                'to open ${widget.appName}. '
                                 '$dailyRemaining more today unlocks everything.',
                         textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.bodySmall,
@@ -201,7 +213,22 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen> {
                   const SizedBox(height: 20),
                   const _AnkiDroidWarning(),
                 ],
-                if (ankiReady && available == 0) ...[
+                if (ankiReady && !hasDecksSelected) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    'Select at least one deck for study to count.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: AppTheme.onSurfaceVariant,
+                        ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextButton(
+                    onPressed: () => context.go('/decks'),
+                    child: const Text('Choose decks'),
+                  ),
+                ],
+                if (ankiReady && hasDecksSelected && available == 0) ...[
                   const SizedBox(height: 16),
                   Text(
                     'No cards are due right now. Come back when you have '
@@ -243,7 +270,9 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen> {
                                   ? 'Opening AnkiDroid…'
                                   : (available == 0
                                       ? 'No cards due'
-                                      : 'Study in AnkiDroid'),
+                                      : !hasDecksSelected
+                                          ? 'Select decks first'
+                                          : 'Study in AnkiDroid'),
                         ),
                       ],
                     ),

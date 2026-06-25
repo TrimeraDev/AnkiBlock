@@ -7,8 +7,9 @@ import '../services/ankidroid_service.dart';
 import '../services/apps_service.dart';
 import '../services/permission_service.dart';
 import '../services/study_scope_service.dart';
+import '../services/support_prompt_service.dart';
 import '../utils/study_day.dart';
-import '../utils/study_streak.dart';
+import '../utils/study_progress.dart';
 
 // Database -------------------------------------------------------------------
 
@@ -150,15 +151,24 @@ final dailyStatsProvider =
   return db.watchDailyStat(date);
 });
 
-/// Consecutive days the daily goal was met (3am study days).
-final studyStreakProvider = FutureProvider<int>((ref) async {
+/// Streak, weekly rollups, and recent daily stats for the progress sheet.
+final studyProgressProvider = FutureProvider<StudyProgressOverview>((ref) async {
   ref.watch(dailyStatsProvider(studyDayKey()));
   final rule = await ref.watch(blockRuleProvider.future);
   final dailyGoal = rule?.dailyCardsGoal ?? 30;
   final db = ref.watch(databaseProvider);
   final rows = await db.getAllDailyStats();
-  final byDate = {for (final row in rows) row.date: row.cardsReviewed};
-  return computeStudyStreak(dailyGoal: dailyGoal, cardsReviewedByDate: byDate);
+  final byDate = {for (final row in rows) row.date: row};
+  return buildStudyProgressOverview(
+    dailyGoal: dailyGoal,
+    statsByDate: byDate,
+  );
+});
+
+/// Consecutive days the daily goal was met (3am study days).
+final studyStreakProvider = FutureProvider<int>((ref) async {
+  final overview = await ref.watch(studyProgressProvider.future);
+  return overview.streak;
 });
 
 /// Today's pickups and screen time across blocked apps (usage access required).
@@ -175,3 +185,13 @@ final gateTodayUsageProvider =
 /// Live progress while a delegated AnkiDroid study session is running.
 final delegatedSessionProgressProvider =
     StateProvider<DelegatedSessionProgress?>((ref) => null);
+
+// Support prompt --------------------------------------------------------------
+
+final supportPromptServiceProvider = Provider<SupportPromptService>((ref) {
+  return SupportPromptService();
+});
+
+final appLaunchCountProvider = StateProvider<int>((ref) => 0);
+
+final supportPromptVisibleProvider = StateProvider<bool>((ref) => false);

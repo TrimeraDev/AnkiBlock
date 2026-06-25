@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/assets/app_assets.dart';
 import '../../core/di/providers.dart';
 import '../../core/navigation/router.dart';
 import '../../core/services/ankidroid_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/brand_widgets.dart';
+import '../../core/widgets/deck_picker_panel.dart';
 import '../../core/widgets/setup_panels.dart';
 
 class OnboardingScreen extends ConsumerStatefulWidget {
@@ -169,8 +171,9 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
                   _SetupScrollPage(
                     title: 'Choose decks to study',
                     subtitle:
-                        'Only cards from these AnkiDroid decks count toward unlocking.',
-                    child: const DeckStudySetupPanel(),
+                        'Reviews from selected decks count toward unlocking. '
+                        'You can switch decks in AnkiDroid anytime.',
+                    child: const DeckPickerPanel(),
                   ),
                   _SetupScrollPage(
                     title: 'Set your goals',
@@ -288,7 +291,7 @@ class _IntroPage extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Image.asset(
-            'lib/src/assets/logo.png',
+            AppAssets.logo,
             width: 96,
             height: 96,
           ),
