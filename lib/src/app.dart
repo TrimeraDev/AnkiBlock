@@ -64,6 +64,7 @@ class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
   Future<void> _onResume() async {
     await mergeDailyFromNative(ref);
     await syncStudyScopeToNative(ref);
+    await syncBlockRuleToNative(ref);
     await ensureAppMonitorRunning(ref);
     await syncDailyGoalToNative(ref);
   }
@@ -72,6 +73,7 @@ class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
     final status = await ref.read(ankiDroidStatusProvider.future);
     if (!status.isReady) return;
     await syncStudyScopeToNative(ref);
+    await syncBlockRuleToNative(ref);
     await ensureAppMonitorRunning(ref);
     await syncDailyGoalToNative(ref);
   }
@@ -110,6 +112,7 @@ class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
         .toList();
     await svc.setBlockedPackages(active);
     await syncStudyScopeToNative(ref);
+    await syncBlockRuleToNative(ref);
     await mergeDailyFromNative(ref);
     await ensureAppMonitorRunning(ref);
     await syncDailyGoalToNative(ref);

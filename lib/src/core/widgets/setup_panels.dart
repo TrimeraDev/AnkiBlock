@@ -5,6 +5,7 @@ import '../di/providers.dart';
 import '../services/apps_service.dart';
 import '../setup/setup_actions.dart';
 import '../theme/app_theme.dart';
+import '../utils/app_usage_format.dart';
 import 'brand_widgets.dart';
 
 /// Preset chips + slider for cards required per unlock.
@@ -242,11 +243,13 @@ class _DailyGoalPanelState extends ConsumerState<DailyGoalPanel> {
 /// Toggle which installed apps are blocked. Shows suggested apps first.
 class AppBlockSetupPanel extends ConsumerWidget {
   final bool suggestedOnly;
+  final bool showUsage;
   final EdgeInsetsGeometry? padding;
 
   const AppBlockSetupPanel({
     super.key,
     this.suggestedOnly = false,
+    this.showUsage = true,
     this.padding,
   });
 
@@ -256,6 +259,7 @@ class AppBlockSetupPanel extends ConsumerWidget {
     final blockedAsync = ref.watch(blockedAppsProvider);
 
     return appsAsync.when(
+      skipLoadingOnRefresh: true,
       loading: () => const Center(
         child: Padding(
           padding: EdgeInsets.all(24),
@@ -278,8 +282,16 @@ class AppBlockSetupPanel extends ConsumerWidget {
 
         final suggested = apps
             .where((a) => kSuggestedBlockPackages.contains(a.packageName))
-            .toList()
-          ..sort((a, b) => a.appName.compareTo(b.appName));
+            .toList();
+        if (showUsage) {
+          suggested.sort((a, b) {
+            final cmp = b.usage.compareTo(a.usage);
+            if (cmp != 0) return cmp;
+            return a.appName.compareTo(b.appName);
+          });
+        } else {
+          suggested.sort((a, b) => a.appName.compareTo(b.appName));
+        }
 
         final others = suggestedOnly
             ? <InstalledApp>[]
@@ -287,8 +299,18 @@ class AppBlockSetupPanel extends ConsumerWidget {
                   .where((a) =>
                       !kSuggestedBlockPackages.contains(a.packageName) &&
                       !a.isSystem)
-                  .toList()
-                ..sort((a, b) => a.appName.compareTo(b.appName)));
+                  .toList());
+        if (!suggestedOnly) {
+          if (showUsage) {
+            others.sort((a, b) {
+              final cmp = b.usage.compareTo(a.usage);
+              if (cmp != 0) return cmp;
+              return a.appName.compareTo(b.appName);
+            });
+          } else {
+            others.sort((a, b) => a.appName.compareTo(b.appName));
+          }
+        }
 
         final list = [...suggested, ...others];
         if (list.isEmpty) {
@@ -333,6 +355,7 @@ class AppBlockSetupPanel extends ConsumerWidget {
                   app: app,
                   isBlocked: isBlocked,
                   isSuggested: isSuggested,
+                  showUsage: showUsage,
                   onChanged: (v) => toggleAppBlocked(
                     ref,
                     app: app,
@@ -352,12 +375,14 @@ class _AppToggleRow extends StatelessWidget {
   final InstalledApp app;
   final bool isBlocked;
   final bool isSuggested;
+  final bool showUsage;
   final ValueChanged<bool> onChanged;
 
   const _AppToggleRow({
     required this.app,
     required this.isBlocked,
     required this.isSuggested,
+    this.showUsage = false,
     required this.onChanged,
   });
 
@@ -386,7 +411,33 @@ class _AppToggleRow extends StatelessWidget {
           ],
         ],
       ),
-      trailing: Switch(value: isBlocked, onChanged: onChanged),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (showUsage) ...[
+            Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  formatAppUsageDuration(app.usage),
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+                Text(
+                  kAppUsagePeriodLabel,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: AppTheme.onSurfaceVariant,
+                      ),
+                ),
+              ],
+            ),
+            const SizedBox(width: 8),
+          ],
+          Switch(value: isBlocked, onChanged: onChanged),
+        ],
+      ),
     );
   }
 }

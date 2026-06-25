@@ -8,6 +8,7 @@ import '../../core/di/providers.dart';
 import '../../core/services/apps_service.dart';
 import '../../core/setup/setup_actions.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/app_usage_format.dart';
 
 class BlockingScreen extends ConsumerStatefulWidget {
   const BlockingScreen({super.key});
@@ -16,10 +17,39 @@ class BlockingScreen extends ConsumerStatefulWidget {
   ConsumerState<BlockingScreen> createState() => _BlockingScreenState();
 }
 
-class _BlockingScreenState extends ConsumerState<BlockingScreen> {
+class _BlockingScreenState extends ConsumerState<BlockingScreen>
+    with WidgetsBindingObserver {
   String _query = '';
   bool _hideSystem = true;
   _SortMode _sort = _SortMode.usage;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshUsageIfNeeded());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshUsageIfNeeded();
+    }
+  }
+
+  Future<void> _refreshUsageIfNeeded() async {
+    final perms =
+        await ref.read(permissionServiceProvider).getBlockingPermissions();
+    if (perms.usage) {
+      await ref.read(installedAppsProvider.notifier).refresh();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -455,7 +485,7 @@ class _AppTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final usageText = _formatDuration(app.usage);
+    final usageText = formatAppUsageDuration(app.usage);
     final isSuggested = kSuggestedBlockPackages.contains(app.packageName);
     return ListTile(
       leading: SizedBox(
@@ -497,7 +527,7 @@ class _AppTile extends StatelessWidget {
                 ),
               ),
               Text(
-                'this week',
+                kAppUsagePeriodLabel,
                 style: theme.textTheme.labelSmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -509,14 +539,6 @@ class _AppTile extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  static String _formatDuration(Duration d) {
-    if (d == Duration.zero) return 'No usage';
-    final h = d.inHours;
-    final m = d.inMinutes.remainder(60);
-    if (h > 0) return '${h}h ${m}m';
-    return '${m}m';
   }
 }
 

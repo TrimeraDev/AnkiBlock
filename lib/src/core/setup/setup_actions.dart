@@ -27,6 +27,14 @@ Future<void> updateDailyCardsGoal(WidgetRef ref, int cards) async {
   await syncDailyGoalToNative(ref);
 }
 
+Future<void> syncBlockRuleToNative(WidgetRef ref) async {
+  final rule = await ref.read(blockRuleProvider.future);
+  await ref.read(appsServiceProvider).syncBlockRuleSettings(
+        unlockDurationMinutes: rule?.unlockDurationMinutes ?? 10,
+        bypassSeconds: rule?.bypassSeconds ?? 60,
+      );
+}
+
 Future<void> syncDailyGoalToNative(WidgetRef ref) async {
   final rule = await ref.read(blockRuleProvider.future);
   final day = studyDayKey();
@@ -129,5 +137,6 @@ Future<void> syncBlockedPackagesToNative(WidgetRef ref) async {
   final svc = ref.read(appsServiceProvider);
   await svc.setBlockedPackages(active);
   await syncStudyScopeToNative(ref);
+  await syncBlockRuleToNative(ref);
   await ensureAppMonitorRunning(ref);
 }

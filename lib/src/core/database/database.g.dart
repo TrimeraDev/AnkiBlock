@@ -318,6 +318,32 @@ class $BlockRulesTable extends BlockRules
       type: DriftSqlType.int,
       requiredDuringInsert: false,
       defaultValue: const Constant(10));
+  static const VerificationMeta _bypassEnabledMeta =
+      const VerificationMeta('bypassEnabled');
+  @override
+  late final GeneratedColumn<bool> bypassEnabled = GeneratedColumn<bool>(
+      'bypass_enabled', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints: GeneratedColumn.constraintIsAlways(
+          'CHECK ("bypass_enabled" IN (0, 1))'),
+      defaultValue: const Constant(true));
+  static const VerificationMeta _bypassDailyCapMeta =
+      const VerificationMeta('bypassDailyCap');
+  @override
+  late final GeneratedColumn<int> bypassDailyCap = GeneratedColumn<int>(
+      'bypass_daily_cap', aliasedName, false,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(2));
+  static const VerificationMeta _bypassSecondsMeta =
+      const VerificationMeta('bypassSeconds');
+  @override
+  late final GeneratedColumn<int> bypassSeconds = GeneratedColumn<int>(
+      'bypass_seconds', aliasedName, false,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(60));
   static const VerificationMeta _isEnabledMeta =
       const VerificationMeta('isEnabled');
   @override
@@ -342,6 +368,9 @@ class $BlockRulesTable extends BlockRules
         cardsRequired,
         dailyCardsGoal,
         unlockDurationMinutes,
+        bypassEnabled,
+        bypassDailyCap,
+        bypassSeconds,
         isEnabled,
         updatedAt
       ];
@@ -376,6 +405,24 @@ class $BlockRulesTable extends BlockRules
           unlockDurationMinutes.isAcceptableOrUnknown(
               data['unlock_duration_minutes']!, _unlockDurationMinutesMeta));
     }
+    if (data.containsKey('bypass_enabled')) {
+      context.handle(
+          _bypassEnabledMeta,
+          bypassEnabled.isAcceptableOrUnknown(
+              data['bypass_enabled']!, _bypassEnabledMeta));
+    }
+    if (data.containsKey('bypass_daily_cap')) {
+      context.handle(
+          _bypassDailyCapMeta,
+          bypassDailyCap.isAcceptableOrUnknown(
+              data['bypass_daily_cap']!, _bypassDailyCapMeta));
+    }
+    if (data.containsKey('bypass_seconds')) {
+      context.handle(
+          _bypassSecondsMeta,
+          bypassSeconds.isAcceptableOrUnknown(
+              data['bypass_seconds']!, _bypassSecondsMeta));
+    }
     if (data.containsKey('is_enabled')) {
       context.handle(_isEnabledMeta,
           isEnabled.isAcceptableOrUnknown(data['is_enabled']!, _isEnabledMeta));
@@ -401,6 +448,12 @@ class $BlockRulesTable extends BlockRules
           .read(DriftSqlType.int, data['${effectivePrefix}daily_cards_goal'])!,
       unlockDurationMinutes: attachedDatabase.typeMapping.read(
           DriftSqlType.int, data['${effectivePrefix}unlock_duration_minutes'])!,
+      bypassEnabled: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}bypass_enabled'])!,
+      bypassDailyCap: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}bypass_daily_cap'])!,
+      bypassSeconds: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}bypass_seconds'])!,
       isEnabled: attachedDatabase.typeMapping
           .read(DriftSqlType.bool, data['${effectivePrefix}is_enabled'])!,
       updatedAt: attachedDatabase.typeMapping
@@ -419,6 +472,9 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
   final int cardsRequired;
   final int dailyCardsGoal;
   final int unlockDurationMinutes;
+  final bool bypassEnabled;
+  final int bypassDailyCap;
+  final int bypassSeconds;
   final bool isEnabled;
   final int updatedAt;
   const BlockRule(
@@ -426,6 +482,9 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
       required this.cardsRequired,
       required this.dailyCardsGoal,
       required this.unlockDurationMinutes,
+      required this.bypassEnabled,
+      required this.bypassDailyCap,
+      required this.bypassSeconds,
       required this.isEnabled,
       required this.updatedAt});
   @override
@@ -435,6 +494,9 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
     map['cards_required'] = Variable<int>(cardsRequired);
     map['daily_cards_goal'] = Variable<int>(dailyCardsGoal);
     map['unlock_duration_minutes'] = Variable<int>(unlockDurationMinutes);
+    map['bypass_enabled'] = Variable<bool>(bypassEnabled);
+    map['bypass_daily_cap'] = Variable<int>(bypassDailyCap);
+    map['bypass_seconds'] = Variable<int>(bypassSeconds);
     map['is_enabled'] = Variable<bool>(isEnabled);
     map['updated_at'] = Variable<int>(updatedAt);
     return map;
@@ -446,6 +508,9 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
       cardsRequired: Value(cardsRequired),
       dailyCardsGoal: Value(dailyCardsGoal),
       unlockDurationMinutes: Value(unlockDurationMinutes),
+      bypassEnabled: Value(bypassEnabled),
+      bypassDailyCap: Value(bypassDailyCap),
+      bypassSeconds: Value(bypassSeconds),
       isEnabled: Value(isEnabled),
       updatedAt: Value(updatedAt),
     );
@@ -460,6 +525,9 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
       dailyCardsGoal: serializer.fromJson<int>(json['dailyCardsGoal']),
       unlockDurationMinutes:
           serializer.fromJson<int>(json['unlockDurationMinutes']),
+      bypassEnabled: serializer.fromJson<bool>(json['bypassEnabled']),
+      bypassDailyCap: serializer.fromJson<int>(json['bypassDailyCap']),
+      bypassSeconds: serializer.fromJson<int>(json['bypassSeconds']),
       isEnabled: serializer.fromJson<bool>(json['isEnabled']),
       updatedAt: serializer.fromJson<int>(json['updatedAt']),
     );
@@ -472,6 +540,9 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
       'cardsRequired': serializer.toJson<int>(cardsRequired),
       'dailyCardsGoal': serializer.toJson<int>(dailyCardsGoal),
       'unlockDurationMinutes': serializer.toJson<int>(unlockDurationMinutes),
+      'bypassEnabled': serializer.toJson<bool>(bypassEnabled),
+      'bypassDailyCap': serializer.toJson<int>(bypassDailyCap),
+      'bypassSeconds': serializer.toJson<int>(bypassSeconds),
       'isEnabled': serializer.toJson<bool>(isEnabled),
       'updatedAt': serializer.toJson<int>(updatedAt),
     };
@@ -482,6 +553,9 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
           int? cardsRequired,
           int? dailyCardsGoal,
           int? unlockDurationMinutes,
+          bool? bypassEnabled,
+          int? bypassDailyCap,
+          int? bypassSeconds,
           bool? isEnabled,
           int? updatedAt}) =>
       BlockRule(
@@ -490,6 +564,9 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
         dailyCardsGoal: dailyCardsGoal ?? this.dailyCardsGoal,
         unlockDurationMinutes:
             unlockDurationMinutes ?? this.unlockDurationMinutes,
+        bypassEnabled: bypassEnabled ?? this.bypassEnabled,
+        bypassDailyCap: bypassDailyCap ?? this.bypassDailyCap,
+        bypassSeconds: bypassSeconds ?? this.bypassSeconds,
         isEnabled: isEnabled ?? this.isEnabled,
         updatedAt: updatedAt ?? this.updatedAt,
       );
@@ -505,6 +582,15 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
       unlockDurationMinutes: data.unlockDurationMinutes.present
           ? data.unlockDurationMinutes.value
           : this.unlockDurationMinutes,
+      bypassEnabled: data.bypassEnabled.present
+          ? data.bypassEnabled.value
+          : this.bypassEnabled,
+      bypassDailyCap: data.bypassDailyCap.present
+          ? data.bypassDailyCap.value
+          : this.bypassDailyCap,
+      bypassSeconds: data.bypassSeconds.present
+          ? data.bypassSeconds.value
+          : this.bypassSeconds,
       isEnabled: data.isEnabled.present ? data.isEnabled.value : this.isEnabled,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
@@ -517,6 +603,9 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
           ..write('cardsRequired: $cardsRequired, ')
           ..write('dailyCardsGoal: $dailyCardsGoal, ')
           ..write('unlockDurationMinutes: $unlockDurationMinutes, ')
+          ..write('bypassEnabled: $bypassEnabled, ')
+          ..write('bypassDailyCap: $bypassDailyCap, ')
+          ..write('bypassSeconds: $bypassSeconds, ')
           ..write('isEnabled: $isEnabled, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -524,8 +613,16 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
   }
 
   @override
-  int get hashCode => Object.hash(id, cardsRequired, dailyCardsGoal,
-      unlockDurationMinutes, isEnabled, updatedAt);
+  int get hashCode => Object.hash(
+      id,
+      cardsRequired,
+      dailyCardsGoal,
+      unlockDurationMinutes,
+      bypassEnabled,
+      bypassDailyCap,
+      bypassSeconds,
+      isEnabled,
+      updatedAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -534,6 +631,9 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
           other.cardsRequired == this.cardsRequired &&
           other.dailyCardsGoal == this.dailyCardsGoal &&
           other.unlockDurationMinutes == this.unlockDurationMinutes &&
+          other.bypassEnabled == this.bypassEnabled &&
+          other.bypassDailyCap == this.bypassDailyCap &&
+          other.bypassSeconds == this.bypassSeconds &&
           other.isEnabled == this.isEnabled &&
           other.updatedAt == this.updatedAt);
 }
@@ -543,6 +643,9 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
   final Value<int> cardsRequired;
   final Value<int> dailyCardsGoal;
   final Value<int> unlockDurationMinutes;
+  final Value<bool> bypassEnabled;
+  final Value<int> bypassDailyCap;
+  final Value<int> bypassSeconds;
   final Value<bool> isEnabled;
   final Value<int> updatedAt;
   const BlockRulesCompanion({
@@ -550,6 +653,9 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
     this.cardsRequired = const Value.absent(),
     this.dailyCardsGoal = const Value.absent(),
     this.unlockDurationMinutes = const Value.absent(),
+    this.bypassEnabled = const Value.absent(),
+    this.bypassDailyCap = const Value.absent(),
+    this.bypassSeconds = const Value.absent(),
     this.isEnabled = const Value.absent(),
     this.updatedAt = const Value.absent(),
   });
@@ -558,6 +664,9 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
     this.cardsRequired = const Value.absent(),
     this.dailyCardsGoal = const Value.absent(),
     this.unlockDurationMinutes = const Value.absent(),
+    this.bypassEnabled = const Value.absent(),
+    this.bypassDailyCap = const Value.absent(),
+    this.bypassSeconds = const Value.absent(),
     this.isEnabled = const Value.absent(),
     this.updatedAt = const Value.absent(),
   });
@@ -566,6 +675,9 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
     Expression<int>? cardsRequired,
     Expression<int>? dailyCardsGoal,
     Expression<int>? unlockDurationMinutes,
+    Expression<bool>? bypassEnabled,
+    Expression<int>? bypassDailyCap,
+    Expression<int>? bypassSeconds,
     Expression<bool>? isEnabled,
     Expression<int>? updatedAt,
   }) {
@@ -575,6 +687,9 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
       if (dailyCardsGoal != null) 'daily_cards_goal': dailyCardsGoal,
       if (unlockDurationMinutes != null)
         'unlock_duration_minutes': unlockDurationMinutes,
+      if (bypassEnabled != null) 'bypass_enabled': bypassEnabled,
+      if (bypassDailyCap != null) 'bypass_daily_cap': bypassDailyCap,
+      if (bypassSeconds != null) 'bypass_seconds': bypassSeconds,
       if (isEnabled != null) 'is_enabled': isEnabled,
       if (updatedAt != null) 'updated_at': updatedAt,
     });
@@ -585,6 +700,9 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
       Value<int>? cardsRequired,
       Value<int>? dailyCardsGoal,
       Value<int>? unlockDurationMinutes,
+      Value<bool>? bypassEnabled,
+      Value<int>? bypassDailyCap,
+      Value<int>? bypassSeconds,
       Value<bool>? isEnabled,
       Value<int>? updatedAt}) {
     return BlockRulesCompanion(
@@ -593,6 +711,9 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
       dailyCardsGoal: dailyCardsGoal ?? this.dailyCardsGoal,
       unlockDurationMinutes:
           unlockDurationMinutes ?? this.unlockDurationMinutes,
+      bypassEnabled: bypassEnabled ?? this.bypassEnabled,
+      bypassDailyCap: bypassDailyCap ?? this.bypassDailyCap,
+      bypassSeconds: bypassSeconds ?? this.bypassSeconds,
       isEnabled: isEnabled ?? this.isEnabled,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -614,6 +735,15 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
       map['unlock_duration_minutes'] =
           Variable<int>(unlockDurationMinutes.value);
     }
+    if (bypassEnabled.present) {
+      map['bypass_enabled'] = Variable<bool>(bypassEnabled.value);
+    }
+    if (bypassDailyCap.present) {
+      map['bypass_daily_cap'] = Variable<int>(bypassDailyCap.value);
+    }
+    if (bypassSeconds.present) {
+      map['bypass_seconds'] = Variable<int>(bypassSeconds.value);
+    }
     if (isEnabled.present) {
       map['is_enabled'] = Variable<bool>(isEnabled.value);
     }
@@ -630,6 +760,9 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
           ..write('cardsRequired: $cardsRequired, ')
           ..write('dailyCardsGoal: $dailyCardsGoal, ')
           ..write('unlockDurationMinutes: $unlockDurationMinutes, ')
+          ..write('bypassEnabled: $bypassEnabled, ')
+          ..write('bypassDailyCap: $bypassDailyCap, ')
+          ..write('bypassSeconds: $bypassSeconds, ')
           ..write('isEnabled: $isEnabled, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -672,9 +805,17 @@ class $DailyStatsTable extends DailyStats
       type: DriftSqlType.int,
       requiredDuringInsert: false,
       defaultValue: const Constant(0));
+  static const VerificationMeta _bypassesUsedMeta =
+      const VerificationMeta('bypassesUsed');
+  @override
+  late final GeneratedColumn<int> bypassesUsed = GeneratedColumn<int>(
+      'bypasses_used', aliasedName, false,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(0));
   @override
   List<GeneratedColumn> get $columns =>
-      [date, cardsReviewed, unlocksEarned, blockedAttempts];
+      [date, cardsReviewed, unlocksEarned, blockedAttempts, bypassesUsed];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -709,6 +850,12 @@ class $DailyStatsTable extends DailyStats
           blockedAttempts.isAcceptableOrUnknown(
               data['blocked_attempts']!, _blockedAttemptsMeta));
     }
+    if (data.containsKey('bypasses_used')) {
+      context.handle(
+          _bypassesUsedMeta,
+          bypassesUsed.isAcceptableOrUnknown(
+              data['bypasses_used']!, _bypassesUsedMeta));
+    }
     return context;
   }
 
@@ -726,6 +873,8 @@ class $DailyStatsTable extends DailyStats
           .read(DriftSqlType.int, data['${effectivePrefix}unlocks_earned'])!,
       blockedAttempts: attachedDatabase.typeMapping
           .read(DriftSqlType.int, data['${effectivePrefix}blocked_attempts'])!,
+      bypassesUsed: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}bypasses_used'])!,
     );
   }
 
@@ -740,11 +889,13 @@ class DailyStat extends DataClass implements Insertable<DailyStat> {
   final int cardsReviewed;
   final int unlocksEarned;
   final int blockedAttempts;
+  final int bypassesUsed;
   const DailyStat(
       {required this.date,
       required this.cardsReviewed,
       required this.unlocksEarned,
-      required this.blockedAttempts});
+      required this.blockedAttempts,
+      required this.bypassesUsed});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -752,6 +903,7 @@ class DailyStat extends DataClass implements Insertable<DailyStat> {
     map['cards_reviewed'] = Variable<int>(cardsReviewed);
     map['unlocks_earned'] = Variable<int>(unlocksEarned);
     map['blocked_attempts'] = Variable<int>(blockedAttempts);
+    map['bypasses_used'] = Variable<int>(bypassesUsed);
     return map;
   }
 
@@ -761,6 +913,7 @@ class DailyStat extends DataClass implements Insertable<DailyStat> {
       cardsReviewed: Value(cardsReviewed),
       unlocksEarned: Value(unlocksEarned),
       blockedAttempts: Value(blockedAttempts),
+      bypassesUsed: Value(bypassesUsed),
     );
   }
 
@@ -772,6 +925,7 @@ class DailyStat extends DataClass implements Insertable<DailyStat> {
       cardsReviewed: serializer.fromJson<int>(json['cardsReviewed']),
       unlocksEarned: serializer.fromJson<int>(json['unlocksEarned']),
       blockedAttempts: serializer.fromJson<int>(json['blockedAttempts']),
+      bypassesUsed: serializer.fromJson<int>(json['bypassesUsed']),
     );
   }
   @override
@@ -782,6 +936,7 @@ class DailyStat extends DataClass implements Insertable<DailyStat> {
       'cardsReviewed': serializer.toJson<int>(cardsReviewed),
       'unlocksEarned': serializer.toJson<int>(unlocksEarned),
       'blockedAttempts': serializer.toJson<int>(blockedAttempts),
+      'bypassesUsed': serializer.toJson<int>(bypassesUsed),
     };
   }
 
@@ -789,12 +944,14 @@ class DailyStat extends DataClass implements Insertable<DailyStat> {
           {String? date,
           int? cardsReviewed,
           int? unlocksEarned,
-          int? blockedAttempts}) =>
+          int? blockedAttempts,
+          int? bypassesUsed}) =>
       DailyStat(
         date: date ?? this.date,
         cardsReviewed: cardsReviewed ?? this.cardsReviewed,
         unlocksEarned: unlocksEarned ?? this.unlocksEarned,
         blockedAttempts: blockedAttempts ?? this.blockedAttempts,
+        bypassesUsed: bypassesUsed ?? this.bypassesUsed,
       );
   DailyStat copyWithCompanion(DailyStatsCompanion data) {
     return DailyStat(
@@ -808,6 +965,9 @@ class DailyStat extends DataClass implements Insertable<DailyStat> {
       blockedAttempts: data.blockedAttempts.present
           ? data.blockedAttempts.value
           : this.blockedAttempts,
+      bypassesUsed: data.bypassesUsed.present
+          ? data.bypassesUsed.value
+          : this.bypassesUsed,
     );
   }
 
@@ -817,14 +977,15 @@ class DailyStat extends DataClass implements Insertable<DailyStat> {
           ..write('date: $date, ')
           ..write('cardsReviewed: $cardsReviewed, ')
           ..write('unlocksEarned: $unlocksEarned, ')
-          ..write('blockedAttempts: $blockedAttempts')
+          ..write('blockedAttempts: $blockedAttempts, ')
+          ..write('bypassesUsed: $bypassesUsed')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode =>
-      Object.hash(date, cardsReviewed, unlocksEarned, blockedAttempts);
+  int get hashCode => Object.hash(
+      date, cardsReviewed, unlocksEarned, blockedAttempts, bypassesUsed);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -832,7 +993,8 @@ class DailyStat extends DataClass implements Insertable<DailyStat> {
           other.date == this.date &&
           other.cardsReviewed == this.cardsReviewed &&
           other.unlocksEarned == this.unlocksEarned &&
-          other.blockedAttempts == this.blockedAttempts);
+          other.blockedAttempts == this.blockedAttempts &&
+          other.bypassesUsed == this.bypassesUsed);
 }
 
 class DailyStatsCompanion extends UpdateCompanion<DailyStat> {
@@ -840,12 +1002,14 @@ class DailyStatsCompanion extends UpdateCompanion<DailyStat> {
   final Value<int> cardsReviewed;
   final Value<int> unlocksEarned;
   final Value<int> blockedAttempts;
+  final Value<int> bypassesUsed;
   final Value<int> rowid;
   const DailyStatsCompanion({
     this.date = const Value.absent(),
     this.cardsReviewed = const Value.absent(),
     this.unlocksEarned = const Value.absent(),
     this.blockedAttempts = const Value.absent(),
+    this.bypassesUsed = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   DailyStatsCompanion.insert({
@@ -853,6 +1017,7 @@ class DailyStatsCompanion extends UpdateCompanion<DailyStat> {
     this.cardsReviewed = const Value.absent(),
     this.unlocksEarned = const Value.absent(),
     this.blockedAttempts = const Value.absent(),
+    this.bypassesUsed = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : date = Value(date);
   static Insertable<DailyStat> custom({
@@ -860,6 +1025,7 @@ class DailyStatsCompanion extends UpdateCompanion<DailyStat> {
     Expression<int>? cardsReviewed,
     Expression<int>? unlocksEarned,
     Expression<int>? blockedAttempts,
+    Expression<int>? bypassesUsed,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -867,6 +1033,7 @@ class DailyStatsCompanion extends UpdateCompanion<DailyStat> {
       if (cardsReviewed != null) 'cards_reviewed': cardsReviewed,
       if (unlocksEarned != null) 'unlocks_earned': unlocksEarned,
       if (blockedAttempts != null) 'blocked_attempts': blockedAttempts,
+      if (bypassesUsed != null) 'bypasses_used': bypassesUsed,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -876,12 +1043,14 @@ class DailyStatsCompanion extends UpdateCompanion<DailyStat> {
       Value<int>? cardsReviewed,
       Value<int>? unlocksEarned,
       Value<int>? blockedAttempts,
+      Value<int>? bypassesUsed,
       Value<int>? rowid}) {
     return DailyStatsCompanion(
       date: date ?? this.date,
       cardsReviewed: cardsReviewed ?? this.cardsReviewed,
       unlocksEarned: unlocksEarned ?? this.unlocksEarned,
       blockedAttempts: blockedAttempts ?? this.blockedAttempts,
+      bypassesUsed: bypassesUsed ?? this.bypassesUsed,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -901,6 +1070,9 @@ class DailyStatsCompanion extends UpdateCompanion<DailyStat> {
     if (blockedAttempts.present) {
       map['blocked_attempts'] = Variable<int>(blockedAttempts.value);
     }
+    if (bypassesUsed.present) {
+      map['bypasses_used'] = Variable<int>(bypassesUsed.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -914,6 +1086,7 @@ class DailyStatsCompanion extends UpdateCompanion<DailyStat> {
           ..write('cardsReviewed: $cardsReviewed, ')
           ..write('unlocksEarned: $unlocksEarned, ')
           ..write('blockedAttempts: $blockedAttempts, ')
+          ..write('bypassesUsed: $bypassesUsed, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -1446,6 +1619,9 @@ typedef $$BlockRulesTableCreateCompanionBuilder = BlockRulesCompanion Function({
   Value<int> cardsRequired,
   Value<int> dailyCardsGoal,
   Value<int> unlockDurationMinutes,
+  Value<bool> bypassEnabled,
+  Value<int> bypassDailyCap,
+  Value<int> bypassSeconds,
   Value<bool> isEnabled,
   Value<int> updatedAt,
 });
@@ -1454,6 +1630,9 @@ typedef $$BlockRulesTableUpdateCompanionBuilder = BlockRulesCompanion Function({
   Value<int> cardsRequired,
   Value<int> dailyCardsGoal,
   Value<int> unlockDurationMinutes,
+  Value<bool> bypassEnabled,
+  Value<int> bypassDailyCap,
+  Value<int> bypassSeconds,
   Value<bool> isEnabled,
   Value<int> updatedAt,
 });
@@ -1480,6 +1659,16 @@ class $$BlockRulesTableFilterComposer
   ColumnFilters<int> get unlockDurationMinutes => $composableBuilder(
       column: $table.unlockDurationMinutes,
       builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<bool> get bypassEnabled => $composableBuilder(
+      column: $table.bypassEnabled, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get bypassDailyCap => $composableBuilder(
+      column: $table.bypassDailyCap,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get bypassSeconds => $composableBuilder(
+      column: $table.bypassSeconds, builder: (column) => ColumnFilters(column));
 
   ColumnFilters<bool> get isEnabled => $composableBuilder(
       column: $table.isEnabled, builder: (column) => ColumnFilters(column));
@@ -1512,6 +1701,18 @@ class $$BlockRulesTableOrderingComposer
       column: $table.unlockDurationMinutes,
       builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<bool> get bypassEnabled => $composableBuilder(
+      column: $table.bypassEnabled,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get bypassDailyCap => $composableBuilder(
+      column: $table.bypassDailyCap,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get bypassSeconds => $composableBuilder(
+      column: $table.bypassSeconds,
+      builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<bool> get isEnabled => $composableBuilder(
       column: $table.isEnabled, builder: (column) => ColumnOrderings(column));
 
@@ -1539,6 +1740,15 @@ class $$BlockRulesTableAnnotationComposer
 
   GeneratedColumn<int> get unlockDurationMinutes => $composableBuilder(
       column: $table.unlockDurationMinutes, builder: (column) => column);
+
+  GeneratedColumn<bool> get bypassEnabled => $composableBuilder(
+      column: $table.bypassEnabled, builder: (column) => column);
+
+  GeneratedColumn<int> get bypassDailyCap => $composableBuilder(
+      column: $table.bypassDailyCap, builder: (column) => column);
+
+  GeneratedColumn<int> get bypassSeconds => $composableBuilder(
+      column: $table.bypassSeconds, builder: (column) => column);
 
   GeneratedColumn<bool> get isEnabled =>
       $composableBuilder(column: $table.isEnabled, builder: (column) => column);
@@ -1574,6 +1784,9 @@ class $$BlockRulesTableTableManager extends RootTableManager<
             Value<int> cardsRequired = const Value.absent(),
             Value<int> dailyCardsGoal = const Value.absent(),
             Value<int> unlockDurationMinutes = const Value.absent(),
+            Value<bool> bypassEnabled = const Value.absent(),
+            Value<int> bypassDailyCap = const Value.absent(),
+            Value<int> bypassSeconds = const Value.absent(),
             Value<bool> isEnabled = const Value.absent(),
             Value<int> updatedAt = const Value.absent(),
           }) =>
@@ -1582,6 +1795,9 @@ class $$BlockRulesTableTableManager extends RootTableManager<
             cardsRequired: cardsRequired,
             dailyCardsGoal: dailyCardsGoal,
             unlockDurationMinutes: unlockDurationMinutes,
+            bypassEnabled: bypassEnabled,
+            bypassDailyCap: bypassDailyCap,
+            bypassSeconds: bypassSeconds,
             isEnabled: isEnabled,
             updatedAt: updatedAt,
           ),
@@ -1590,6 +1806,9 @@ class $$BlockRulesTableTableManager extends RootTableManager<
             Value<int> cardsRequired = const Value.absent(),
             Value<int> dailyCardsGoal = const Value.absent(),
             Value<int> unlockDurationMinutes = const Value.absent(),
+            Value<bool> bypassEnabled = const Value.absent(),
+            Value<int> bypassDailyCap = const Value.absent(),
+            Value<int> bypassSeconds = const Value.absent(),
             Value<bool> isEnabled = const Value.absent(),
             Value<int> updatedAt = const Value.absent(),
           }) =>
@@ -1598,6 +1817,9 @@ class $$BlockRulesTableTableManager extends RootTableManager<
             cardsRequired: cardsRequired,
             dailyCardsGoal: dailyCardsGoal,
             unlockDurationMinutes: unlockDurationMinutes,
+            bypassEnabled: bypassEnabled,
+            bypassDailyCap: bypassDailyCap,
+            bypassSeconds: bypassSeconds,
             isEnabled: isEnabled,
             updatedAt: updatedAt,
           ),
@@ -1625,6 +1847,7 @@ typedef $$DailyStatsTableCreateCompanionBuilder = DailyStatsCompanion Function({
   Value<int> cardsReviewed,
   Value<int> unlocksEarned,
   Value<int> blockedAttempts,
+  Value<int> bypassesUsed,
   Value<int> rowid,
 });
 typedef $$DailyStatsTableUpdateCompanionBuilder = DailyStatsCompanion Function({
@@ -1632,6 +1855,7 @@ typedef $$DailyStatsTableUpdateCompanionBuilder = DailyStatsCompanion Function({
   Value<int> cardsReviewed,
   Value<int> unlocksEarned,
   Value<int> blockedAttempts,
+  Value<int> bypassesUsed,
   Value<int> rowid,
 });
 
@@ -1656,6 +1880,9 @@ class $$DailyStatsTableFilterComposer
   ColumnFilters<int> get blockedAttempts => $composableBuilder(
       column: $table.blockedAttempts,
       builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get bypassesUsed => $composableBuilder(
+      column: $table.bypassesUsed, builder: (column) => ColumnFilters(column));
 }
 
 class $$DailyStatsTableOrderingComposer
@@ -1681,6 +1908,10 @@ class $$DailyStatsTableOrderingComposer
   ColumnOrderings<int> get blockedAttempts => $composableBuilder(
       column: $table.blockedAttempts,
       builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get bypassesUsed => $composableBuilder(
+      column: $table.bypassesUsed,
+      builder: (column) => ColumnOrderings(column));
 }
 
 class $$DailyStatsTableAnnotationComposer
@@ -1703,6 +1934,9 @@ class $$DailyStatsTableAnnotationComposer
 
   GeneratedColumn<int> get blockedAttempts => $composableBuilder(
       column: $table.blockedAttempts, builder: (column) => column);
+
+  GeneratedColumn<int> get bypassesUsed => $composableBuilder(
+      column: $table.bypassesUsed, builder: (column) => column);
 }
 
 class $$DailyStatsTableTableManager extends RootTableManager<
@@ -1732,6 +1966,7 @@ class $$DailyStatsTableTableManager extends RootTableManager<
             Value<int> cardsReviewed = const Value.absent(),
             Value<int> unlocksEarned = const Value.absent(),
             Value<int> blockedAttempts = const Value.absent(),
+            Value<int> bypassesUsed = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               DailyStatsCompanion(
@@ -1739,6 +1974,7 @@ class $$DailyStatsTableTableManager extends RootTableManager<
             cardsReviewed: cardsReviewed,
             unlocksEarned: unlocksEarned,
             blockedAttempts: blockedAttempts,
+            bypassesUsed: bypassesUsed,
             rowid: rowid,
           ),
           createCompanionCallback: ({
@@ -1746,6 +1982,7 @@ class $$DailyStatsTableTableManager extends RootTableManager<
             Value<int> cardsReviewed = const Value.absent(),
             Value<int> unlocksEarned = const Value.absent(),
             Value<int> blockedAttempts = const Value.absent(),
+            Value<int> bypassesUsed = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               DailyStatsCompanion.insert(
@@ -1753,6 +1990,7 @@ class $$DailyStatsTableTableManager extends RootTableManager<
             cardsReviewed: cardsReviewed,
             unlocksEarned: unlocksEarned,
             blockedAttempts: blockedAttempts,
+            bypassesUsed: bypassesUsed,
             rowid: rowid,
           ),
           withReferenceMapper: (p0) => p0

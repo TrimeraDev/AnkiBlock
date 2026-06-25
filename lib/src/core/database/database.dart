@@ -33,6 +33,9 @@ class BlockRules extends Table {
   IntColumn get dailyCardsGoal => integer().withDefault(const Constant(30))();
   IntColumn get unlockDurationMinutes =>
       integer().withDefault(const Constant(10))();
+  BoolColumn get bypassEnabled => boolean().withDefault(const Constant(true))();
+  IntColumn get bypassDailyCap => integer().withDefault(const Constant(2))();
+  IntColumn get bypassSeconds => integer().withDefault(const Constant(60))();
   BoolColumn get isEnabled => boolean().withDefault(const Constant(true))();
   IntColumn get updatedAt =>
       integer().withDefault(Constant(DateTime.now().millisecondsSinceEpoch))();
@@ -47,6 +50,7 @@ class DailyStats extends Table {
   IntColumn get cardsReviewed => integer().withDefault(const Constant(0))();
   IntColumn get unlocksEarned => integer().withDefault(const Constant(0))();
   IntColumn get blockedAttempts => integer().withDefault(const Constant(0))();
+  IntColumn get bypassesUsed => integer().withDefault(const Constant(0))();
 
   @override
   Set<Column> get primaryKey => {date};
@@ -85,7 +89,7 @@ class AppDatabase extends _$AppDatabase {
   }
 
   @override
-  int get schemaVersion => 6;
+  int get schemaVersion => 7;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -97,6 +101,25 @@ class AppDatabase extends _$AppDatabase {
           );
         },
         onUpgrade: (m, from, to) async {
+          if (from < 7) {
+            await m.database.customStatement(
+              'ALTER TABLE block_rules '
+              'ADD COLUMN bypass_enabled INTEGER NOT NULL DEFAULT 1 '
+              'CHECK (bypass_enabled IN (0, 1))',
+            );
+            await m.database.customStatement(
+              'ALTER TABLE block_rules '
+              'ADD COLUMN bypass_daily_cap INTEGER NOT NULL DEFAULT 2',
+            );
+            await m.database.customStatement(
+              'ALTER TABLE block_rules '
+              'ADD COLUMN bypass_seconds INTEGER NOT NULL DEFAULT 60',
+            );
+            await m.database.customStatement(
+              'ALTER TABLE daily_stats '
+              'ADD COLUMN bypasses_used INTEGER NOT NULL DEFAULT 0',
+            );
+          }
           if (from < 6) {
             await m.database.customStatement(
               'ALTER TABLE block_rules '
@@ -278,6 +301,21 @@ class AppDatabase extends _$AppDatabase {
       await (update(dailyStats)..where((d) => d.date.equals(date))).write(
           DailyStatsCompanion(
               blockedAttempts: Value(stat.blockedAttempts + 1)));
+    }
+  }
+
+  Future incrementBypassesUsed(String date) async {
+    final stat = await getDailyStat(date);
+    if (stat == null) {
+      await insertOrUpdateDailyStat(
+        DailyStatsCompanion(
+          date: Value(date),
+          bypassesUsed: const Value(1),
+        ),
+      );
+    } else {
+      await (update(dailyStats)..where((d) => d.date.equals(date))).write(
+          DailyStatsCompanion(bypassesUsed: Value(stat.bypassesUsed + 1)));
     }
   }
 }

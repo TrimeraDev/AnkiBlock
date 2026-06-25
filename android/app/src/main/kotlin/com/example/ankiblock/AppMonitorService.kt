@@ -1,5 +1,6 @@
 package com.example.ankiblock
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -66,11 +67,19 @@ class AppMonitorService : Service() {
 
         private const val TAG = "AnkiBlock.Delegate"
 
+        @Volatile
+        private var runningInstance: AppMonitorService? = null
+
         const val ANKIDROID_PACKAGE = "com.ichi2.anki"
         const val POLL_MS_IDLE = 800L
         const val POLL_MS_DELEGATED = 500L
-        // After unlocking an app, ignore it for this many ms
-        const val UNLOCK_GRACE_MS = 5 * 60 * 1000L
+
+        const val KEY_UNLOCK_DURATION_MS = "unlock_duration_ms"
+        const val KEY_BYPASS_SECONDS = "bypass_seconds"
+        const val DEFAULT_UNLOCK_DURATION_MS = 10 * 60 * 1000L
+        const val DEFAULT_BYPASS_SECONDS = 60
+
+        private fun unlockUntilKey(pkg: String) = "unlock_until_$pkg"
 
         fun setBlockedPackages(
             context: Context,
@@ -88,9 +97,55 @@ class AppMonitorService : Service() {
                 .apply()
         }
 
-        fun grantTempUnlock(context: Context, pkg: String) {
+        fun setBlockRuleSettings(
+            context: Context,
+            unlockDurationMinutes: Int,
+            bypassSeconds: Int,
+        ) {
             val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            prefs.edit().putLong("unlock_$pkg", System.currentTimeMillis()).apply()
+            val unlockMs = (unlockDurationMinutes.coerceAtLeast(1) * 60 * 1000L)
+            prefs.edit()
+                .putLong(KEY_UNLOCK_DURATION_MS, unlockMs)
+                .putInt(KEY_BYPASS_SECONDS, bypassSeconds.coerceAtLeast(1))
+                .apply()
+        }
+
+        fun grantTempUnlock(
+            context: Context,
+            pkg: String,
+            durationMs: Long? = null,
+        ) {
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val duration = durationMs
+                ?: prefs.getLong(KEY_UNLOCK_DURATION_MS, DEFAULT_UNLOCK_DURATION_MS)
+            val until = System.currentTimeMillis() + duration.coerceAtLeast(1_000L)
+            prefs.edit().putLong(unlockUntilKey(pkg), until).apply()
+        }
+
+        fun grantBypass(
+            context: Context,
+            pkg: String,
+            durationMs: Long? = null,
+        ) {
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val duration = durationMs
+                ?: (prefs.getInt(KEY_BYPASS_SECONDS, DEFAULT_BYPASS_SECONDS) * 1000L)
+            val until = System.currentTimeMillis() + duration.coerceAtLeast(1_000L)
+            prefs.edit().putLong(unlockUntilKey(pkg), until).apply()
+        }
+
+        private fun isPackageUnlocked(prefs: SharedPreferences, pkg: String): Boolean {
+            val until = prefs.getLong(unlockUntilKey(pkg), 0L)
+            return until > System.currentTimeMillis()
+        }
+
+        private fun hadUnlockThatExpired(
+            prefs: SharedPreferences,
+            pkg: String,
+            now: Long = System.currentTimeMillis(),
+        ): Boolean {
+            val until = prefs.getLong(unlockUntilKey(pkg), 0L)
+            return until > 0L && now >= until
         }
 
         fun setDailyGoalState(
@@ -214,6 +269,7 @@ class AppMonitorService : Service() {
                 .remove(KEY_DELEGATED_COMPLETE_STREAK)
                 .remove(KEY_DELEGATED_STARTED_AT)
                 .apply()
+            runningInstance?.onDelegatedSessionEnded()
         }
 
         private fun hasDelegatedSession(prefs: SharedPreferences): Boolean {
@@ -241,6 +297,15 @@ class AppMonitorService : Service() {
     private var lastReportedProgress = -1
     private var lastPassiveWatching = false
 
+    private data class DelegatedUnlockProgress(
+        val appName: String,
+        val packageName: String,
+        val completed: Int,
+        val target: Int,
+    ) {
+        val isUnlock: Boolean get() = packageName != PRACTICE_PACKAGE
+    }
+
     private val pollRunnable = object : Runnable {
         override fun run() {
             try {
@@ -260,6 +325,7 @@ class AppMonitorService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        runningInstance = this
         prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         overlayManager = CompletionOverlayManager(this)
         ankiApi = AnkiDroidApi(applicationContext)
@@ -304,12 +370,14 @@ class AppMonitorService : Service() {
             prefs.edit().remove(KEY_DELEGATED_CARD_KEYS).apply()
             keyTrackers.clear()
             lastReportedProgress = -1
+            refreshDelegatedNotification()
             Log.i(TAG, "delegated session started — expecting AnkiDroid foreground")
         }
         return START_STICKY
     }
 
     override fun onDestroy() {
+        if (runningInstance === this) runningInstance = null
         handler.removeCallbacks(pollRunnable)
         overlayManager.dismiss()
         super.onDestroy()
@@ -328,30 +396,110 @@ class AppMonitorService : Service() {
         }
     }
 
-    private fun buildNotification(progressText: String? = null) =
-        NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("AnkiBlock active")
-            .setContentText(
-                progressText ?: when {
-                    hasDelegatedSession(prefs) ->
-                        "Watching your AnkiDroid study session"
-                    currentForegroundPackage == ANKIDROID_PACKAGE ->
-                        "Counting AnkiDroid study toward your daily goal"
-                    else -> "Watching for blocked apps"
-                },
-            )
-            .setSmallIcon(android.R.drawable.ic_lock_lock)
+    private fun buildNotification(
+        delegated: DelegatedUnlockProgress? = null,
+        dailyReviewed: Int? = null,
+        dailyGoal: Int? = null,
+        dailyCompleteMessage: String? = null,
+    ): Notification {
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_logo)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
 
-    private fun reportProgressIfChanged(completed: Int, target: Int) {
+        when {
+            delegated != null -> {
+                val title = if (delegated.isUnlock) {
+                    "Unlock ${delegated.appName}"
+                } else {
+                    "Study session"
+                }
+                builder
+                    .setContentTitle(title)
+                    .setContentText("${delegated.completed} / ${delegated.target} cards")
+                    .setProgress(delegated.target, delegated.completed, false)
+            }
+            dailyCompleteMessage != null -> {
+                builder
+                    .setContentTitle("AnkiBlock active")
+                    .setContentText(dailyCompleteMessage)
+            }
+            dailyReviewed != null && dailyGoal != null && dailyGoal > 0 -> {
+                builder
+                    .setContentTitle("AnkiBlock active")
+                    .setContentText("Daily goal: $dailyReviewed / $dailyGoal cards")
+                    .setProgress(
+                        dailyGoal,
+                        dailyReviewed.coerceAtMost(dailyGoal),
+                        false,
+                    )
+            }
+            else -> {
+                builder
+                    .setContentTitle("AnkiBlock active")
+                    .setContentText(
+                        when {
+                            hasDelegatedSession(prefs) ->
+                                "Watching your AnkiDroid study session"
+                            currentForegroundPackage == ANKIDROID_PACKAGE ->
+                                "Counting AnkiDroid study toward your daily goal"
+                            else -> "Watching for blocked apps"
+                        },
+                    )
+            }
+        }
+        return builder.build()
+    }
+
+    private fun postForegroundNotification(notification: Notification) {
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.notify(NOTIFICATION_ID, notification)
+    }
+
+    private fun resetForegroundNotification() {
+        postForegroundNotification(buildNotification())
+    }
+
+    private fun onDelegatedSessionEnded() {
+        lastReportedProgress = -1
+        resetForegroundNotification()
+    }
+
+    private fun refreshDelegatedNotification() {
+        val pkg = prefs.getString(KEY_DELEGATED_PKG, null) ?: return
+        val appName = prefs.getString(KEY_DELEGATED_APP_NAME, pkg) ?: pkg
+        val target = prefs.getInt(KEY_DELEGATED_TARGET, 5)
+        postForegroundNotification(
+            buildNotification(
+                delegated = DelegatedUnlockProgress(
+                    appName = appName,
+                    packageName = pkg,
+                    completed = 0,
+                    target = target,
+                ),
+            ),
+        )
+    }
+
+    private fun reportProgressIfChanged(
+        completed: Int,
+        target: Int,
+        appName: String,
+        packageName: String,
+    ) {
         if (completed == lastReportedProgress) return
         lastReportedProgress = completed
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.notify(
-            NOTIFICATION_ID,
-            buildNotification("Studied $completed of $target cards"),
+        postForegroundNotification(
+            buildNotification(
+                delegated = DelegatedUnlockProgress(
+                    appName = appName,
+                    packageName = packageName,
+                    completed = completed,
+                    target = target,
+                ),
+            ),
         )
         MainActivity.notifyFlutter(
             "onDelegatedProgress",
@@ -367,6 +515,7 @@ class AppMonitorService : Service() {
             checkPassiveStudy(foreground)
         }
         checkBlockedAppGate(foreground)
+        checkExpiredUnlockWhileForeground(foreground)
     }
 
     private fun queryLatestForegroundPackage(): String? {
@@ -416,8 +565,7 @@ class AppMonitorService : Service() {
             if (lastPassiveWatching) {
                 consolidatePassiveTrackers()
                 lastPassiveWatching = false
-                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                nm.notify(NOTIFICATION_ID, buildNotification())
+                resetForegroundNotification()
             }
             return
         }
@@ -438,8 +586,7 @@ class AppMonitorService : Service() {
         if (!lastPassiveWatching) {
             lastPassiveWatching = true
             Log.i(TAG, "passive watching AnkiDroid decks=$deckIds")
-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            nm.notify(NOTIFICATION_ID, buildNotification())
+            resetForegroundNotification()
         }
 
         ensureMultiDeckSnapshot(
@@ -487,17 +634,13 @@ class AppMonitorService : Service() {
 
         Log.i(TAG, "passive study +$delta cards (daily=$newDaily passiveTotal=$passiveTotal)")
 
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val goal = prefs.getInt(KEY_DAILY_GOAL, 0)
-        val progressText = if (goal > 0 && newDaily >= goal) {
-            "Studied $newDaily cards today"
+        val notification = if (goal > 0 && newDaily >= goal) {
+            buildNotification(dailyCompleteMessage = "Studied $newDaily cards today")
         } else {
-            "Daily goal: $newDaily / $goal cards"
+            buildNotification(dailyReviewed = newDaily, dailyGoal = goal)
         }
-        nm.notify(
-            NOTIFICATION_ID,
-            buildNotification(progressText),
-        )
+        postForegroundNotification(notification)
         MainActivity.notifyFlutter(
             "onPassiveStudyProgress",
             mapOf("delta" to delta, "cardsReviewed" to newDaily),
@@ -699,7 +842,7 @@ class AppMonitorService : Service() {
         }
         prefs.edit().putInt(KEY_DELEGATED_COMPLETE_STREAK, streak).apply()
 
-        reportProgressIfChanged(completed, target)
+        reportProgressIfChanged(completed, target, appName, pkg)
 
         Log.d(
             TAG,
@@ -765,16 +908,36 @@ class AppMonitorService : Service() {
         if (pkg !in blocked) return
 
         if (isDailyGoalComplete(prefs)) return
+        if (isPackageUnlocked(prefs, pkg)) return
 
         val now = System.currentTimeMillis()
-        val unlockTime = prefs.getLong("unlock_$pkg", 0L)
-        if (now - unlockTime < UNLOCK_GRACE_MS) return
-
         val lastTrig = lastTriggerTimes[pkg] ?: 0L
         if (now - lastTrig < 2_000) return
         lastTriggerTimes[pkg] = now
 
         val displayName = lookupDisplayName(pkg) ?: pkg
+        launchGate(pkg, displayName)
+    }
+
+    private fun checkExpiredUnlockWhileForeground(foreground: String?) {
+        val pkg = foreground ?: return
+        if (pkg == packageName) return
+
+        val blockedCsv = prefs.getString(KEY_BLOCKED, "") ?: ""
+        if (blockedCsv.isEmpty()) return
+        val blocked = blockedCsv.split("|").filter { it.isNotEmpty() }.toSet()
+        if (pkg !in blocked) return
+
+        if (isDailyGoalComplete(prefs)) return
+        if (!hadUnlockThatExpired(prefs, pkg)) return
+
+        val now = System.currentTimeMillis()
+        val lastTrig = lastTriggerTimes[pkg] ?: 0L
+        if (now - lastTrig < 2_000) return
+        lastTriggerTimes[pkg] = now
+
+        val displayName = lookupDisplayName(pkg) ?: pkg
+        prefs.edit().remove(unlockUntilKey(pkg)).apply()
         launchGate(pkg, displayName)
     }
 

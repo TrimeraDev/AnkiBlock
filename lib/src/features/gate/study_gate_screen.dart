@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -5,9 +7,9 @@ import 'package:go_router/go_router.dart';
 import '../../core/assets/app_assets.dart';
 import '../../core/di/providers.dart';
 import '../../core/services/ankidroid_service.dart';
-import '../../core/services/apps_service.dart';
 import '../../core/services/study_launcher.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/bypass.dart';
 import '../../core/utils/deck_scope_format.dart';
 import '../../core/utils/study_day.dart';
 import '../../core/widgets/brand_widgets.dart';
@@ -28,17 +30,34 @@ class StudyGateScreen extends ConsumerStatefulWidget {
   ConsumerState<StudyGateScreen> createState() => _StudyGateScreenState();
 }
 
-class _StudyGateScreenState extends ConsumerState<StudyGateScreen> {
+class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
+    with WidgetsBindingObserver {
   bool _delegating = false;
+  bool _bypassing = false;
   bool _autoLaunched = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _recordBlockedAttempt();
       _maybeAutoLaunch();
+      ref.invalidate(gateTodayUsageProvider(widget.packageName));
     });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      ref.invalidate(gateTodayUsageProvider(widget.packageName));
+    }
   }
 
   Future<void> _recordBlockedAttempt() async {
@@ -89,6 +108,30 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen> {
     }
   }
 
+  Future<void> _useEmergencyBypass({required int bypassSeconds}) async {
+    if (_bypassing) return;
+    setState(() => _bypassing = true);
+    try {
+      final today = studyDayKey();
+      final db = ref.read(databaseProvider);
+      await db.incrementBypassesUsed(today);
+      ref.invalidate(dailyStatsProvider(today));
+      ref.invalidate(studyProgressProvider);
+
+      await ref.read(appsServiceProvider).grantBypass(
+            widget.packageName,
+            durationMs: bypassSeconds * 1000,
+          );
+      final launched = await ref.read(appsServiceProvider).launchApp(
+            widget.packageName,
+          );
+      if (!launched) return;
+      if (mounted) context.go('/');
+    } finally {
+      if (mounted) setState(() => _bypassing = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final ruleAsync = ref.watch(blockRuleProvider);
@@ -111,7 +154,6 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen> {
     final hasDecksSelected = scope != null &&
         decks.isNotEmpty &&
         hasDecksInScope(scope, decks);
-    final usage = usageAsync.valueOrNull ?? TodayBlockedUsage.zero;
     final reviewed = dailyStatsAsync.valueOrNull?.cardsReviewed ?? 0;
     final dailyComplete =
         isDailyGoalComplete(dailyGoal: dailyGoal, cardsReviewed: reviewed);
@@ -120,6 +162,24 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen> {
         ? (reviewed / dailyGoal).clamp(0.0, 1.0)
         : 0.0;
     final remaining = dailyComplete ? 0 : unlockGoal;
+
+    final rule = ruleAsync.valueOrNull;
+    final bypassEnabled = rule?.bypassEnabled ?? true;
+    final bypassCap = rule?.bypassDailyCap ?? 2;
+    final bypassSeconds = rule?.bypassSeconds ?? 60;
+    final bypassesUsed = dailyStatsAsync.valueOrNull?.bypassesUsed ?? 0;
+    final bypassesLeft = bypassesRemaining(
+      bypassEnabled: bypassEnabled,
+      bypassDailyCap: bypassCap,
+      bypassesUsed: bypassesUsed,
+    );
+    final showBypass = !dailyComplete &&
+        bypassEnabled &&
+        canUseBypass(
+          bypassEnabled: bypassEnabled,
+          bypassDailyCap: bypassCap,
+          bypassesUsed: bypassesUsed,
+        );
 
     final canStudy = ankiReady && available > 0 && hasDecksSelected;
 
@@ -163,12 +223,22 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen> {
                 const SizedBox(height: 10),
                 StreakBanner(streakAsync: streakAsync, center: true),
                 const SizedBox(height: 12),
-                if (!usageAsync.isLoading)
-                  Text(
-                    _formatTodayUsage(usage.focusPickups, usage.focusScreenTime),
+                usageAsync.when(
+                  loading: () => Text(
+                    'Loading today\'s usage…',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
+                  error: (_, __) => const SizedBox.shrink(),
+                  data: (usage) => Text(
+                    _formatTodayUsage(
+                      usage.focusPickups,
+                      usage.focusScreenTime,
+                    ),
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
                 const SizedBox(height: 16),
                 BrandCard(
                   color: AppTheme.cardElevated,
@@ -277,6 +347,26 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen> {
                       ],
                     ),
                   ),
+                if (showBypass) ...[
+                  const SizedBox(height: 12),
+                  _HoldToBypassButton(
+                    bypassSeconds: bypassSeconds,
+                    remainingBypasses: bypassesLeft,
+                    busy: _bypassing,
+                    onConfirmed: () =>
+                        _useEmergencyBypass(bypassSeconds: bypassSeconds),
+                  ),
+                ],
+                if (!dailyComplete && bypassEnabled && bypassesLeft == 0) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    'No emergency bypasses left today. Study to unlock.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppTheme.onSurfaceVariant,
+                        ),
+                  ),
+                ],
                 if (dailyComplete) ...[
                   GradientButton(
                     onPressed: () async {
@@ -308,6 +398,123 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen> {
     final m = screenTime.inMinutes.remainder(60);
     final duration = h > 0 ? '${h}h, $m min' : '$m min';
     return '$opens today · $duration on this app';
+  }
+}
+
+class _HoldToBypassButton extends StatefulWidget {
+  final int bypassSeconds;
+  final int remainingBypasses;
+  final bool busy;
+  final VoidCallback onConfirmed;
+
+  const _HoldToBypassButton({
+    required this.bypassSeconds,
+    required this.remainingBypasses,
+    required this.busy,
+    required this.onConfirmed,
+  });
+
+  @override
+  State<_HoldToBypassButton> createState() => _HoldToBypassButtonState();
+}
+
+class _HoldToBypassButtonState extends State<_HoldToBypassButton> {
+  static const _holdDuration = Duration(seconds: 3);
+  static const _tick = Duration(milliseconds: 50);
+
+  Timer? _timer;
+  double _progress = 0;
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _startHold() {
+    if (widget.busy) return;
+    _timer?.cancel();
+    _timer = Timer.periodic(_tick, (_) {
+      setState(() {
+        _progress += _tick.inMilliseconds / _holdDuration.inMilliseconds;
+        if (_progress >= 1) {
+          _timer?.cancel();
+          _progress = 0;
+          widget.onConfirmed();
+        }
+      });
+    });
+  }
+
+  void _cancelHold() {
+    _timer?.cancel();
+    if (_progress > 0) {
+      setState(() => _progress = 0);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final label = widget.busy
+        ? 'Opening ${widget.bypassSeconds}s access…'
+        : 'Hold for emergency ${widget.bypassSeconds}s access';
+
+    return Listener(
+      onPointerDown: (_) => _startHold(),
+      onPointerUp: (_) => _cancelHold(),
+      onPointerCancel: (_) => _cancelHold(),
+      child: OutlinedButton(
+        onPressed: widget.busy ? null : () {},
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          side: BorderSide(
+            color: _progress > 0 ? AppTheme.accent : AppTheme.onSurfaceVariant,
+          ),
+        ),
+        child: Column(
+          children: [
+            if (_progress > 0)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: LinearProgressIndicator(
+                  value: _progress,
+                  minHeight: 3,
+                  backgroundColor: AppTheme.cardElevated,
+                  color: AppTheme.accent,
+                ),
+              ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (widget.busy)
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else
+                  const Icon(Icons.emergency_outlined, size: 18),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    label,
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '${widget.remainingBypasses} left today · re-blocks when time is up',
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: AppTheme.onSurfaceVariant,
+                  ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

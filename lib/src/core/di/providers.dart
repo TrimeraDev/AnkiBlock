@@ -44,9 +44,21 @@ class InstalledAppsNotifier extends AsyncNotifier<List<InstalledApp>> {
   @override
   Future<List<InstalledApp>> build() async {
     ref.keepAlive();
+
+    ref.listen(blockingPermissionsProvider, (previous, next) {
+      final wasUsage = previous?.valueOrNull?.usage ?? false;
+      final nowUsage = next.valueOrNull?.usage ?? false;
+      if (!wasUsage && nowUsage) {
+        unawaited(refresh());
+      }
+    });
+
+    final perms = await ref.watch(blockingPermissionsProvider.future);
     final cached = await _loadFromCache();
     if (cached.isNotEmpty) {
-      unawaited(refresh());
+      if (perms.usage) {
+        unawaited(refresh());
+      }
       return cached;
     }
     return _fetchAndSave();

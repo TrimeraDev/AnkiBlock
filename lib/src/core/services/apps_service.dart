@@ -202,10 +202,36 @@ class AppsService {
     await _channel.invokeMethod('stopAppMonitor');
   }
 
-  Future<void> grantTempUnlock(String packageName) async {
+  Future<void> grantTempUnlock(
+    String packageName, {
+    int? durationMs,
+  }) async {
     if (!Platform.isAndroid) return;
     await _channel.invokeMethod('grantTempUnlock', {
       'packageName': packageName,
+      if (durationMs != null) 'durationMs': durationMs,
+    });
+  }
+
+  Future<void> grantBypass(
+    String packageName, {
+    int? durationMs,
+  }) async {
+    if (!Platform.isAndroid) return;
+    await _channel.invokeMethod('grantBypass', {
+      'packageName': packageName,
+      if (durationMs != null) 'durationMs': durationMs,
+    });
+  }
+
+  Future<void> syncBlockRuleSettings({
+    required int unlockDurationMinutes,
+    required int bypassSeconds,
+  }) async {
+    if (!Platform.isAndroid) return;
+    await _channel.invokeMethod('syncBlockRuleSettings', {
+      'unlockDurationMinutes': unlockDurationMinutes,
+      'bypassSeconds': bypassSeconds,
     });
   }
 

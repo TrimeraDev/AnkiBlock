@@ -639,33 +639,50 @@ class _AccomplishmentsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Column(
       children: [
-        Expanded(
-          child: _MiniStat(
-            icon: Icons.check_circle_outline,
-            value: '${stats?.cardsReviewed ?? 0}',
-            label: 'Studied',
-            color: AppTheme.success,
-          ),
+        Row(
+          children: [
+            Expanded(
+              child: _MiniStat(
+                icon: Icons.check_circle_outline,
+                value: '${stats?.cardsReviewed ?? 0}',
+                label: 'Studied',
+                color: AppTheme.success,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _MiniStat(
+                icon: Icons.lock_open,
+                value: '${stats?.unlocksEarned ?? 0}',
+                label: 'Unlocks',
+                color: AppTheme.accent,
+              ),
+            ),
+          ],
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _MiniStat(
-            icon: Icons.lock_open,
-            value: '${stats?.unlocksEarned ?? 0}',
-            label: 'Unlocks',
-            color: AppTheme.accent,
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _MiniStat(
-            icon: Icons.shield_outlined,
-            value: '${stats?.blockedAttempts ?? 0}',
-            label: 'Resisted',
-            color: AppTheme.primary,
-          ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _MiniStat(
+                icon: Icons.shield_outlined,
+                value: '${stats?.blockedAttempts ?? 0}',
+                label: 'Resisted',
+                color: AppTheme.primary,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _MiniStat(
+                icon: Icons.emergency_outlined,
+                value: '${stats?.bypassesUsed ?? 0}',
+                label: 'Bypasses',
+                color: AppTheme.warning,
+              ),
+            ),
+          ],
         ),
       ],
     );

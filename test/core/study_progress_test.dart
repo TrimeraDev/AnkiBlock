@@ -9,6 +9,7 @@ DailyStat _stat(String date, int cards) {
     cardsReviewed: cards,
     unlocksEarned: 0,
     blockedAttempts: 0,
+    bypassesUsed: 0,
   );
 }
 

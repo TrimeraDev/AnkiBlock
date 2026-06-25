@@ -36,6 +36,9 @@ class SettingsScreen extends ConsumerWidget {
     final cards = rule?.cardsRequired ?? 10;
     final daily = rule?.dailyCardsGoal ?? 30;
     final minutes = rule?.unlockDurationMinutes ?? 10;
+    final bypassEnabled = rule?.bypassEnabled ?? true;
+    final bypassCap = rule?.bypassDailyCap ?? 2;
+    final bypassSeconds = rule?.bypassSeconds ?? 60;
     final enabled = rule?.isEnabled ?? true;
 
     return ListView(
@@ -127,9 +130,69 @@ class SettingsScreen extends ConsumerWidget {
               suffix: 'minutes',
             );
             if (result != null) {
-              _save(ref, unlockDurationMinutes: Value(result));
+              await _save(ref, unlockDurationMinutes: Value(result));
+              await syncBlockRuleToNative(ref);
             }
           },
+        ),
+        const Divider(),
+        const _SectionHeader(label: 'Emergency bypass'),
+        SwitchListTile(
+          secondary: const Icon(Icons.emergency_outlined),
+          title: const Text('Emergency bypass'),
+          subtitle: const Text(
+            'Short timed access from the study gate without reviewing cards.',
+          ),
+          value: bypassEnabled,
+          onChanged: (v) async {
+            await _save(ref, bypassEnabled: Value(v));
+          },
+        ),
+        ListTile(
+          leading: const Icon(Icons.repeat),
+          title: const Text('Bypasses per day'),
+          subtitle: Text('$bypassCap uses per study day'),
+          enabled: bypassEnabled,
+          onTap: bypassEnabled
+              ? () async {
+                  final result = await _pickInt(
+                    context,
+                    title: 'Daily bypass limit',
+                    initial: bypassCap,
+                    min: 1,
+                    max: 10,
+                    suffix: 'uses',
+                  );
+                  if (result != null) {
+                    await _save(ref, bypassDailyCap: Value(result));
+                  }
+                }
+              : null,
+        ),
+        ListTile(
+          leading: const Icon(Icons.timer_off_outlined),
+          title: const Text('Bypass duration'),
+          subtitle: Text('$bypassSeconds seconds per use'),
+          enabled: bypassEnabled,
+          onTap: bypassEnabled
+              ? () async {
+                  final result = await _pickInt(
+                    context,
+                    title: 'Bypass duration',
+                    initial: bypassSeconds,
+                    min: 15,
+                    max: 300,
+                    suffix: 'seconds',
+                  );
+                  if (result != null) {
+                    await _save(
+                      ref,
+                      bypassSeconds: Value(result),
+                    );
+                    await syncBlockRuleToNative(ref);
+                  }
+                }
+              : null,
         ),
         const Divider(),
         const _SectionHeader(label: 'Support'),
@@ -230,6 +293,9 @@ class SettingsScreen extends ConsumerWidget {
     Value<int>? cardsRequired,
     Value<int>? dailyCardsGoal,
     Value<int>? unlockDurationMinutes,
+    Value<bool>? bypassEnabled,
+    Value<int>? bypassDailyCap,
+    Value<int>? bypassSeconds,
     Value<bool>? isEnabled,
   }) async {
     final db = ref.read(databaseProvider);
@@ -238,10 +304,16 @@ class SettingsScreen extends ConsumerWidget {
       cardsRequired: cardsRequired ?? const Value.absent(),
       dailyCardsGoal: dailyCardsGoal ?? const Value.absent(),
       unlockDurationMinutes: unlockDurationMinutes ?? const Value.absent(),
+      bypassEnabled: bypassEnabled ?? const Value.absent(),
+      bypassDailyCap: bypassDailyCap ?? const Value.absent(),
+      bypassSeconds: bypassSeconds ?? const Value.absent(),
       isEnabled: isEnabled ?? const Value.absent(),
       updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
     ));
     ref.invalidate(blockRuleProvider);
+    if (unlockDurationMinutes != null || bypassSeconds != null) {
+      await syncBlockRuleToNative(ref);
+    }
   }
 
   Future<int?> _pickInt(

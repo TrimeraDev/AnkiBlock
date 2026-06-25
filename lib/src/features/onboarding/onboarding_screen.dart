@@ -57,6 +57,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
   Future<void> _refresh() async {
     final perm = ref.read(permissionServiceProvider);
     final anki = ref.read(ankiDroidServiceProvider);
+    final hadUsage = _hasUsage;
     final usage = await perm.hasUsageAccessPermission();
     final overlay = await perm.hasOverlayPermission();
     final notif = await perm.hasNotificationPermission();
@@ -69,6 +70,10 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
       _ankiInstalled = ankiStatus.installed;
       _ankiPermission = ankiStatus.permissionGranted;
     });
+    ref.invalidate(blockingPermissionsProvider);
+    if (usage && (!hadUsage || _page == 4)) {
+      await ref.read(installedAppsProvider.notifier).refresh();
+    }
   }
 
   Future<void> _finish() async {
@@ -103,7 +108,12 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
             Expanded(
               child: PageView(
                 controller: _controller,
-                onPageChanged: (i) => setState(() => _page = i),
+                onPageChanged: (i) {
+                  setState(() => _page = i);
+                  if (i == 4 && _hasUsage) {
+                    ref.read(installedAppsProvider.notifier).refresh();
+                  }
+                },
                 children: [
                   const _IntroPage(),
                   _PermissionPage(
@@ -166,7 +176,10 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
                     title: 'Block your worst apps',
                     subtitle:
                         'Toggle the apps that should stay locked until you study.',
-                    child: const AppBlockSetupPanel(suggestedOnly: true),
+                    child: AppBlockSetupPanel(
+                      suggestedOnly: true,
+                      showUsage: _hasUsage,
+                    ),
                   ),
                   _SetupScrollPage(
                     title: 'Choose decks to study',

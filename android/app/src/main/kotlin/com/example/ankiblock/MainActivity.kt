@@ -134,9 +134,29 @@ class MainActivity : FlutterActivity() {
                 }
                 "grantTempUnlock" -> {
                     val pkg = call.argument<String>("packageName") ?: ""
+                    val durationMs = (call.argument<Number>("durationMs"))?.toLong()
                     if (pkg.isNotEmpty()) {
-                        AppMonitorService.grantTempUnlock(this, pkg)
+                        AppMonitorService.grantTempUnlock(this, pkg, durationMs)
                     }
+                    result.success(true)
+                }
+                "grantBypass" -> {
+                    val pkg = call.argument<String>("packageName") ?: ""
+                    val durationMs = (call.argument<Number>("durationMs"))?.toLong()
+                    if (pkg.isNotEmpty()) {
+                        AppMonitorService.grantBypass(this, pkg, durationMs)
+                    }
+                    result.success(true)
+                }
+                "syncBlockRuleSettings" -> {
+                    val unlockDurationMinutes =
+                        call.argument<Int>("unlockDurationMinutes") ?: 10
+                    val bypassSeconds = call.argument<Int>("bypassSeconds") ?: 60
+                    AppMonitorService.setBlockRuleSettings(
+                        this,
+                        unlockDurationMinutes,
+                        bypassSeconds,
+                    )
                     result.success(true)
                 }
                 "syncDailyGoalState" -> {
