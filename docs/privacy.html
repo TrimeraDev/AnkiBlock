@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Privacy Policy — AnkiBlock</title>
+    <meta
+      name="description"
+      content="Privacy policy for the AnkiBlock Android app (com.anki.ankidroid)."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/style.css" />
+    <link rel="icon" href="assets/logo.png" type="image/png" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="site-header-inner">
+        <a class="brand" href="index.html">
+          <img src="assets/logo.png" alt="" width="36" height="36" />
+          AnkiBlock
+        </a>
+        <nav class="site-nav" aria-label="Site">
+          <a href="index.html">Home</a>
+          <a href="privacy.html" aria-current="page">Privacy</a>
+          <a href="imprint.html">Imprint</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="page legal-page">
+      <h1>Privacy Policy</h1>
+      <p class="meta">
+        App: AnkiBlock (<code>com.anki.ankidroid</code>) &middot; Last updated:
+        June 25, 2025
+      </p>
+
+      <p>
+        This privacy policy describes how AnkiBlock (“we”, “our”, or “the app”)
+        handles information when you use the AnkiBlock Android application
+        published by Simon &amp; Vincent UG (haftungsbeschränkt). AnkiBlock is
+        a non-commercial, open-source community project distributed free of
+        charge.
+      </p>
+
+      <h2>Summary</h2>
+      <ul>
+        <li>AnkiBlock does <strong>not</strong> require an account or sign-in.</li>
+        <li>
+          AnkiBlock does <strong>not</strong> operate backend servers that collect
+          your personal data.
+        </li>
+        <li>
+          AnkiBlock does <strong>not</strong> include third-party analytics,
+          advertising, in-app purchases, or crash-reporting SDKs.
+        </li>
+        <li>
+          Data needed for app blocking and study tracking is processed and stored
+          <strong>locally on your device</strong>.
+        </li>
+        <li>
+          Optional donation links (if shown) open external sites or payment apps;
+          AnkiBlock does not process payments.
+        </li>
+      </ul>
+
+      <h2>Data controller</h2>
+      <p>
+        Simon &amp; Vincent UG (haftungsbeschränkt)<br />
+        Paulusstraße 6, 52064 Aachen, Germany<br />
+        Contact:
+        <a href="mailto:ankiblock@trimera.dev">ankiblock@trimera.dev</a>
+        or
+        <a
+          href="https://github.com/TrimeraDev/AnkiBlock/issues"
+          rel="noopener noreferrer"
+          target="_blank"
+          >GitHub Issues</a
+        >
+      </p>
+      <p>
+        For legal provider details, see our
+        <a href="imprint.html">Imprint</a>.
+      </p>
+
+      <h2>What data the app processes</h2>
+
+      <h3>Data stored locally by AnkiBlock</h3>
+      <p>
+        AnkiBlock stores the following information in a local database on your
+        device:
+      </p>
+      <ul>
+        <li>
+          <strong>Blocked apps:</strong> package names and display names of apps
+          you choose to block.
+        </li>
+        <li>
+          <strong>Study gate settings:</strong> cards required to unlock, daily
+          goal, unlock duration, and whether blocking is enabled.
+        </li>
+        <li>
+          <strong>Daily statistics:</strong> cards reviewed, unlocks earned, and
+          blocked launch attempts per calendar day.
+        </li>
+        <li>
+          <strong>Installed apps cache:</strong> package names, display names,
+          optional app icons, system-app flag, and aggregated usage time from the
+          last successful scan (used to show the app picker and usage hints).
+        </li>
+        <li>
+          <strong>Preferences:</strong> onboarding completion and AnkiDroid deck
+          scope settings (via Android SharedPreferences).
+        </li>
+      </ul>
+      <p>
+        This data stays on your device and is not transmitted to us.
+      </p>
+
+      <h3>Data read from AnkiDroid (not copied to our servers)</h3>
+      <p>
+        With your permission, AnkiBlock reads information from AnkiDroid through
+        AnkiDroid’s public ContentProvider API, including:
+      </p>
+      <ul>
+        <li>Deck names and identifiers</li>
+        <li>Due and new card counts</li>
+        <li>Card scheduling metadata needed to track completed reviews during a study session</li>
+      </ul>
+      <p>
+        AnkiBlock uses this data only to display your study queue, open the
+        AnkiDroid reviewer, and determine when you have earned an app unlock.
+        Your flashcards, notes, and review history remain in AnkiDroid. Any sync
+        with AnkiWeb is handled by AnkiDroid, not by AnkiBlock.
+      </p>
+
+      <h3>Device permissions</h3>
+      <p>AnkiBlock requests the following Android permissions:</p>
+      <ul>
+        <li>
+          <strong>Usage access:</strong> to detect when a blocked app is opened
+          and to show approximate app usage time in the picker.
+        </li>
+        <li>
+          <strong>Display over other apps:</strong> to show the study gate and
+          completion overlay when a blocked app is launched.
+        </li>
+        <li>
+          <strong>Notifications:</strong> to show foreground service and
+          completion notifications while the app monitor is active.
+        </li>
+        <li>
+          <strong>Query installed apps:</strong> to list apps you can block.
+        </li>
+        <li>
+          <strong>AnkiDroid database access
+          (<code>com.ichi2.anki.permission.READ_WRITE_DATABASE</code>):</strong>
+          to read deck and card data from AnkiDroid with your consent.
+        </li>
+        <li>
+          <strong>Foreground service:</strong> to monitor the foreground app
+          while enforcing the study gate.
+        </li>
+      </ul>
+      <p>
+        You can revoke permissions at any time in Android system settings. Some
+        app features will not work without the relevant permission.
+      </p>
+
+      <h2>What we do not collect</h2>
+      <ul>
+        <li>Name, email address, or other account credentials (no account system)</li>
+        <li>Precise location</li>
+        <li>Contacts, photos, microphone, or camera data</li>
+        <li>Payment or financial information through the app itself</li>
+        <li>Advertising identifiers for tracking</li>
+      </ul>
+
+      <h2>Voluntary donations</h2>
+      <p>
+        AnkiBlock may offer optional links to support the Anki project or the
+        developer (for example via PayPal Friends &amp; Family or the Anki
+        Foundation). If you choose to use such a link, you leave AnkiBlock and
+        any payment or personal data you provide is handled solely by that
+        third-party service under its own terms and privacy policy. We do not
+        receive or store your payment details.
+      </p>
+
+      <h2>Data sharing</h2>
+      <p>
+        We do not sell your personal data. AnkiBlock does not transmit your data
+        to Simon &amp; Vincent UG or other third parties for processing.
+      </p>
+      <p>
+        Data may be shared only in these limited cases:
+      </p>
+      <ul>
+        <li>
+          <strong>AnkiDroid:</strong> when you study, AnkiBlock interacts with
+          the AnkiDroid app installed on your device via its documented API.
+        </li>
+        <li>
+          <strong>Legal requirements:</strong> if required by applicable law,
+          regulation, or valid legal process.
+        </li>
+      </ul>
+
+      <h2>Data retention and deletion</h2>
+      <p>
+        Local AnkiBlock data is kept until you change or clear it in the app, or
+        until you uninstall AnkiBlock. Uninstalling the app removes AnkiBlock’s
+        local database and app-specific preferences from your device.
+      </p>
+      <p>
+        Data in AnkiDroid is governed by AnkiDroid’s own privacy practices and
+        remains under your control in that app.
+      </p>
+
+      <h2>Children</h2>
+      <p>
+        AnkiBlock is not directed at children under 13 (or the minimum age required
+        in your country). We do not knowingly collect personal information from
+        children.
+      </p>
+
+      <h2>International users</h2>
+      <p>
+        Because AnkiBlock processes data locally on your device and does not
+        operate collection servers, your information is not transferred to us
+        across borders.
+      </p>
+
+      <h2>Your rights</h2>
+      <p>
+        Depending on your location, you may have rights to access, correct, delete,
+        or restrict processing of personal data. Because AnkiBlock stores data
+        locally, you can exercise most of these rights directly by using in-app
+        settings or uninstalling the app.
+      </p>
+      <p>
+        To contact us about privacy, email
+        <a href="mailto:ankiblock@trimera.dev">ankiblock@trimera.dev</a>
+        or use
+        <a
+          href="https://github.com/TrimeraDev/AnkiBlock/issues"
+          rel="noopener noreferrer"
+          target="_blank"
+          >GitHub Issues</a
+        >.
+      </p>
+
+      <h2>Changes to this policy</h2>
+      <p>
+        We may update this privacy policy from time to time. The “Last updated”
+        date at the top will reflect the latest version. Continued use of the app
+        after changes constitutes acceptance of the updated policy.
+      </p>
+
+      <h2>Third-party services</h2>
+      <p>
+        AnkiBlock integrates with AnkiDroid (<code>com.ichi2.anki</code>), an
+        independent app. Please review AnkiDroid’s privacy policy for how that
+        app handles your study data.
+      </p>
+    </main>
+
+    <footer class="site-footer">
+      <p>
+        &copy; Simon &amp; Vincent UG (haftungsbeschränkt). AnkiBlock is not
+        affiliated with Anki or AnkiDroid.
+      </p>
+      <p>
+        <a href="index.html">Home</a>
+        &middot;
+        <a href="imprint.html">Imprint</a>
+      </p>
+    </footer>
+  </body>
+</html>
