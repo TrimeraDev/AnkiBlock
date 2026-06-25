@@ -7,6 +7,8 @@ import '../services/ankidroid_service.dart';
 import '../services/apps_service.dart';
 import '../services/permission_service.dart';
 import '../services/study_scope_service.dart';
+import '../utils/study_day.dart';
+import '../utils/study_streak.dart';
 
 // Database -------------------------------------------------------------------
 
@@ -148,6 +150,17 @@ final dailyStatsProvider =
   return db.watchDailyStat(date);
 });
 
+/// Consecutive days the daily goal was met (3am study days).
+final studyStreakProvider = FutureProvider<int>((ref) async {
+  ref.watch(dailyStatsProvider(studyDayKey()));
+  final rule = await ref.watch(blockRuleProvider.future);
+  final dailyGoal = rule?.dailyCardsGoal ?? 30;
+  final db = ref.watch(databaseProvider);
+  final rows = await db.getAllDailyStats();
+  final byDate = {for (final row in rows) row.date: row.cardsReviewed};
+  return computeStudyStreak(dailyGoal: dailyGoal, cardsReviewedByDate: byDate);
+});
+
 /// Today's pickups and screen time across blocked apps (usage access required).
 final gateTodayUsageProvider =
     FutureProvider.family<TodayBlockedUsage, String>((ref, focusPackage) async {
@@ -158,3 +171,7 @@ final gateTodayUsageProvider =
         focusPackage: focusPackage,
       );
 });
+
+/// Live progress while a delegated AnkiDroid study session is running.
+final delegatedSessionProgressProvider =
+    StateProvider<DelegatedSessionProgress?>((ref) => null);

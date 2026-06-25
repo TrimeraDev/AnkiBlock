@@ -6,26 +6,36 @@ import '../navigation/router.dart';
 import '../theme/app_theme.dart';
 
 /// Shown under the status bar when Android blocking permissions are incomplete.
+/// Hidden during onboarding, where those permissions are requested step-by-step.
 class GlobalBlockingPermissionBanner extends ConsumerWidget {
   const GlobalBlockingPermissionBanner({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final async = ref.watch(blockingPermissionsProvider);
-    return async.when(
-      data: (s) {
-        if (s.usage && s.overlay) return const SizedBox.shrink();
-        return _BannerBody(
-          missingUsage: !s.usage,
-          missingOverlay: !s.overlay,
+    final router = ref.watch(routerProvider);
+    return ListenableBuilder(
+      listenable: router.routeInformationProvider,
+      builder: (context, _) {
+        final path = router.routeInformationProvider.value.uri.path;
+        if (path == '/onboarding') return const SizedBox.shrink();
+
+        final async = ref.watch(blockingPermissionsProvider);
+        return async.when(
+          data: (s) {
+            if (s.usage && s.overlay) return const SizedBox.shrink();
+            return _BannerBody(
+              missingUsage: !s.usage,
+              missingOverlay: !s.overlay,
+            );
+          },
+          loading: () => const SizedBox.shrink(),
+          error: (_, __) => const _BannerBody(
+            missingUsage: true,
+            missingOverlay: true,
+            verifyFailed: true,
+          ),
         );
       },
-      loading: () => const SizedBox.shrink(),
-      error: (_, __) => const _BannerBody(
-        missingUsage: true,
-        missingOverlay: true,
-        verifyFailed: true,
-      ),
     );
   }
 }
@@ -69,7 +79,7 @@ class _BannerBody extends ConsumerWidget {
               child: Text(
                 message,
                 style: theme.textTheme.bodyMedium?.copyWith(
-                  color: AppTheme.onBackground,
+                  color: AppTheme.onSurface,
                   height: 1.35,
                 ),
               ),

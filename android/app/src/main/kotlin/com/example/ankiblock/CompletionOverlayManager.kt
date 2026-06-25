@@ -174,7 +174,7 @@ class CompletionOverlayManager(private val context: Context) {
         val builder = NotificationCompat.Builder(context, COMPLETION_CHANNEL_ID)
             .setContentTitle("Study complete!")
             .setContentText("You've studied $cardsCompleted cards. Tap to open $appName.")
-            .setSmallIcon(android.R.drawable.ic_lock_lock)
+            .setSmallIcon(R.drawable.ic_logo)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
         if (openPi != null) {

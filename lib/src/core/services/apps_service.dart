@@ -108,6 +108,31 @@ const Set<String> kSuggestedBlockPackages = {
   'com.supercell.clashofclans',
 };
 
+/// Voluntary study from the home screen — native side tracks cards without unlocking an app.
+const String kPracticeStudyPackage = '__ankiblock_practice__';
+
+class DelegatedSessionProgress {
+  final int completed;
+  final int target;
+
+  const DelegatedSessionProgress({
+    required this.completed,
+    required this.target,
+  });
+}
+
+class NativeDailyGoalState {
+  final String studyDayKey;
+  final int dailyGoal;
+  final int cardsReviewed;
+
+  const NativeDailyGoalState({
+    required this.studyDayKey,
+    required this.dailyGoal,
+    required this.cardsReviewed,
+  });
+}
+
 class AppsService {
   static const _channel = MethodChannel('com.ankiblock/permissions');
 
@@ -121,6 +146,15 @@ class AppsService {
   final _delegatedUnlockController = StreamController<int>.broadcast();
   Stream<int> get delegatedUnlocks => _delegatedUnlockController.stream;
 
+  final _delegatedProgressController =
+      StreamController<DelegatedSessionProgress>.broadcast();
+  Stream<DelegatedSessionProgress> get delegatedProgress =>
+      _delegatedProgressController.stream;
+
+  final _passiveStudyController = StreamController<int>.broadcast();
+  /// Cards credited from organic AnkiDroid study (not via AnkiBlock session).
+  Stream<int> get passiveStudyProgress => _passiveStudyController.stream;
+
   Future<dynamic> _handleNativeCall(MethodCall call) async {
     if (call.method == 'openGate') {
       final args = Map<String, dynamic>.from(call.arguments as Map);
@@ -128,10 +162,21 @@ class AppsService {
         args['packageName'] as String? ?? '',
         args['appName'] as String? ?? '',
       ));
+    } else if (call.method == 'onDelegatedProgress') {
+      final args = Map<String, dynamic>.from(call.arguments as Map);
+      final completed = (args['completed'] as num?)?.toInt() ?? 0;
+      final target = (args['target'] as num?)?.toInt() ?? 0;
+      _delegatedProgressController.add(
+        DelegatedSessionProgress(completed: completed, target: target),
+      );
     } else if (call.method == 'onDelegatedUnlock') {
       final args = Map<String, dynamic>.from(call.arguments as Map);
       final cards = (args['cardsCompleted'] as num?)?.toInt() ?? 0;
       if (cards > 0) _delegatedUnlockController.add(cards);
+    } else if (call.method == 'onPassiveStudyProgress') {
+      final args = Map<String, dynamic>.from(call.arguments as Map);
+      final delta = (args['delta'] as num?)?.toInt() ?? 0;
+      if (delta > 0) _passiveStudyController.add(delta);
     }
     return null;
   }
@@ -162,6 +207,53 @@ class AppsService {
     await _channel.invokeMethod('grantTempUnlock', {
       'packageName': packageName,
     });
+  }
+
+  /// Syncs today's study progress so native blocking can skip the gate when
+  /// the daily goal is complete.
+  Future<void> syncDailyGoalState({
+    required String studyDayKey,
+    required int dailyGoal,
+    required int cardsReviewed,
+  }) async {
+    if (!Platform.isAndroid) return;
+    await _channel.invokeMethod('syncDailyGoalState', {
+      'studyDayKey': studyDayKey,
+      'dailyGoal': dailyGoal,
+      'cardsReviewed': cardsReviewed,
+    });
+  }
+
+  Future<void> syncStudyScope({required List<int> deckIds}) async {
+    if (!Platform.isAndroid) return;
+    await _channel.invokeMethod('syncStudyScope', {
+      'deckIds': deckIds,
+    });
+  }
+
+  Future<NativeDailyGoalState> getDailyGoalState() async {
+    if (!Platform.isAndroid) {
+      return const NativeDailyGoalState(
+        studyDayKey: '',
+        dailyGoal: 0,
+        cardsReviewed: 0,
+      );
+    }
+    final raw = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+      'getDailyGoalState',
+    );
+    if (raw == null) {
+      return const NativeDailyGoalState(
+        studyDayKey: '',
+        dailyGoal: 0,
+        cardsReviewed: 0,
+      );
+    }
+    return NativeDailyGoalState(
+      studyDayKey: raw['studyDayKey'] as String? ?? '',
+      dailyGoal: (raw['dailyGoal'] as num?)?.toInt() ?? 0,
+      cardsReviewed: (raw['cardsReviewed'] as num?)?.toInt() ?? 0,
+    );
   }
 
   /// Starts a delegated study session tracked by [AppMonitorService] while the

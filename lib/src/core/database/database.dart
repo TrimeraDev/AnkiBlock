@@ -29,7 +29,8 @@ class BlockedApps extends Table {
 @DataClassName('BlockRule')
 class BlockRules extends Table {
   IntColumn get id => integer()();
-  IntColumn get cardsRequired => integer().withDefault(const Constant(3))();
+  IntColumn get cardsRequired => integer().withDefault(const Constant(10))();
+  IntColumn get dailyCardsGoal => integer().withDefault(const Constant(30))();
   IntColumn get unlockDurationMinutes =>
       integer().withDefault(const Constant(10))();
   BoolColumn get isEnabled => boolean().withDefault(const Constant(true))();
@@ -84,7 +85,7 @@ class AppDatabase extends _$AppDatabase {
   }
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -96,6 +97,12 @@ class AppDatabase extends _$AppDatabase {
           );
         },
         onUpgrade: (m, from, to) async {
+          if (from < 6) {
+            await m.database.customStatement(
+              'ALTER TABLE block_rules '
+              'ADD COLUMN daily_cards_goal INTEGER NOT NULL DEFAULT 30',
+            );
+          }
           if (from < 5) {
             await m.database
                 .customStatement('DROP TABLE IF EXISTS unlock_sessions');
@@ -201,6 +208,8 @@ class AppDatabase extends _$AppDatabase {
       (select(dailyStats)..where((d) => d.date.equals(date)))
           .watchSingleOrNull();
 
+  Future<List<DailyStat>> getAllDailyStats() => select(dailyStats).get();
+
   Future insertOrUpdateDailyStat(DailyStatsCompanion stat) =>
       into(dailyStats).insertOnConflictUpdate(stat);
 
@@ -221,6 +230,23 @@ class AppDatabase extends _$AppDatabase {
     } else {
       await (update(dailyStats)..where((d) => d.date.equals(date))).write(
           DailyStatsCompanion(cardsReviewed: Value(stat.cardsReviewed + count)));
+    }
+  }
+
+  /// Sets today's reviewed count when native passive tracking is ahead of Drift.
+  Future setCardsReviewedForDay(String date, int count) async {
+    if (count < 0) return;
+    final stat = await getDailyStat(date);
+    if (stat == null) {
+      await insertOrUpdateDailyStat(
+        DailyStatsCompanion(
+          date: Value(date),
+          cardsReviewed: Value(count),
+        ),
+      );
+    } else if (count > stat.cardsReviewed) {
+      await (update(dailyStats)..where((d) => d.date.equals(date))).write(
+          DailyStatsCompanion(cardsReviewed: Value(count)));
     }
   }
 

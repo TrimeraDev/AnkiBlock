@@ -301,7 +301,15 @@ class $BlockRulesTable extends BlockRules
       'cards_required', aliasedName, false,
       type: DriftSqlType.int,
       requiredDuringInsert: false,
-      defaultValue: const Constant(3));
+      defaultValue: const Constant(10));
+  static const VerificationMeta _dailyCardsGoalMeta =
+      const VerificationMeta('dailyCardsGoal');
+  @override
+  late final GeneratedColumn<int> dailyCardsGoal = GeneratedColumn<int>(
+      'daily_cards_goal', aliasedName, false,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(30));
   static const VerificationMeta _unlockDurationMinutesMeta =
       const VerificationMeta('unlockDurationMinutes');
   @override
@@ -329,8 +337,14 @@ class $BlockRulesTable extends BlockRules
       requiredDuringInsert: false,
       defaultValue: Constant(DateTime.now().millisecondsSinceEpoch));
   @override
-  List<GeneratedColumn> get $columns =>
-      [id, cardsRequired, unlockDurationMinutes, isEnabled, updatedAt];
+  List<GeneratedColumn> get $columns => [
+        id,
+        cardsRequired,
+        dailyCardsGoal,
+        unlockDurationMinutes,
+        isEnabled,
+        updatedAt
+      ];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -349,6 +363,12 @@ class $BlockRulesTable extends BlockRules
           _cardsRequiredMeta,
           cardsRequired.isAcceptableOrUnknown(
               data['cards_required']!, _cardsRequiredMeta));
+    }
+    if (data.containsKey('daily_cards_goal')) {
+      context.handle(
+          _dailyCardsGoalMeta,
+          dailyCardsGoal.isAcceptableOrUnknown(
+              data['daily_cards_goal']!, _dailyCardsGoalMeta));
     }
     if (data.containsKey('unlock_duration_minutes')) {
       context.handle(
@@ -377,6 +397,8 @@ class $BlockRulesTable extends BlockRules
           .read(DriftSqlType.int, data['${effectivePrefix}id'])!,
       cardsRequired: attachedDatabase.typeMapping
           .read(DriftSqlType.int, data['${effectivePrefix}cards_required'])!,
+      dailyCardsGoal: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}daily_cards_goal'])!,
       unlockDurationMinutes: attachedDatabase.typeMapping.read(
           DriftSqlType.int, data['${effectivePrefix}unlock_duration_minutes'])!,
       isEnabled: attachedDatabase.typeMapping
@@ -395,12 +417,14 @@ class $BlockRulesTable extends BlockRules
 class BlockRule extends DataClass implements Insertable<BlockRule> {
   final int id;
   final int cardsRequired;
+  final int dailyCardsGoal;
   final int unlockDurationMinutes;
   final bool isEnabled;
   final int updatedAt;
   const BlockRule(
       {required this.id,
       required this.cardsRequired,
+      required this.dailyCardsGoal,
       required this.unlockDurationMinutes,
       required this.isEnabled,
       required this.updatedAt});
@@ -409,6 +433,7 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
     final map = <String, Expression>{};
     map['id'] = Variable<int>(id);
     map['cards_required'] = Variable<int>(cardsRequired);
+    map['daily_cards_goal'] = Variable<int>(dailyCardsGoal);
     map['unlock_duration_minutes'] = Variable<int>(unlockDurationMinutes);
     map['is_enabled'] = Variable<bool>(isEnabled);
     map['updated_at'] = Variable<int>(updatedAt);
@@ -419,6 +444,7 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
     return BlockRulesCompanion(
       id: Value(id),
       cardsRequired: Value(cardsRequired),
+      dailyCardsGoal: Value(dailyCardsGoal),
       unlockDurationMinutes: Value(unlockDurationMinutes),
       isEnabled: Value(isEnabled),
       updatedAt: Value(updatedAt),
@@ -431,6 +457,7 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
     return BlockRule(
       id: serializer.fromJson<int>(json['id']),
       cardsRequired: serializer.fromJson<int>(json['cardsRequired']),
+      dailyCardsGoal: serializer.fromJson<int>(json['dailyCardsGoal']),
       unlockDurationMinutes:
           serializer.fromJson<int>(json['unlockDurationMinutes']),
       isEnabled: serializer.fromJson<bool>(json['isEnabled']),
@@ -443,6 +470,7 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
     return <String, dynamic>{
       'id': serializer.toJson<int>(id),
       'cardsRequired': serializer.toJson<int>(cardsRequired),
+      'dailyCardsGoal': serializer.toJson<int>(dailyCardsGoal),
       'unlockDurationMinutes': serializer.toJson<int>(unlockDurationMinutes),
       'isEnabled': serializer.toJson<bool>(isEnabled),
       'updatedAt': serializer.toJson<int>(updatedAt),
@@ -452,12 +480,14 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
   BlockRule copyWith(
           {int? id,
           int? cardsRequired,
+          int? dailyCardsGoal,
           int? unlockDurationMinutes,
           bool? isEnabled,
           int? updatedAt}) =>
       BlockRule(
         id: id ?? this.id,
         cardsRequired: cardsRequired ?? this.cardsRequired,
+        dailyCardsGoal: dailyCardsGoal ?? this.dailyCardsGoal,
         unlockDurationMinutes:
             unlockDurationMinutes ?? this.unlockDurationMinutes,
         isEnabled: isEnabled ?? this.isEnabled,
@@ -469,6 +499,9 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
       cardsRequired: data.cardsRequired.present
           ? data.cardsRequired.value
           : this.cardsRequired,
+      dailyCardsGoal: data.dailyCardsGoal.present
+          ? data.dailyCardsGoal.value
+          : this.dailyCardsGoal,
       unlockDurationMinutes: data.unlockDurationMinutes.present
           ? data.unlockDurationMinutes.value
           : this.unlockDurationMinutes,
@@ -482,6 +515,7 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
     return (StringBuffer('BlockRule(')
           ..write('id: $id, ')
           ..write('cardsRequired: $cardsRequired, ')
+          ..write('dailyCardsGoal: $dailyCardsGoal, ')
           ..write('unlockDurationMinutes: $unlockDurationMinutes, ')
           ..write('isEnabled: $isEnabled, ')
           ..write('updatedAt: $updatedAt')
@@ -490,14 +524,15 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
   }
 
   @override
-  int get hashCode => Object.hash(
-      id, cardsRequired, unlockDurationMinutes, isEnabled, updatedAt);
+  int get hashCode => Object.hash(id, cardsRequired, dailyCardsGoal,
+      unlockDurationMinutes, isEnabled, updatedAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is BlockRule &&
           other.id == this.id &&
           other.cardsRequired == this.cardsRequired &&
+          other.dailyCardsGoal == this.dailyCardsGoal &&
           other.unlockDurationMinutes == this.unlockDurationMinutes &&
           other.isEnabled == this.isEnabled &&
           other.updatedAt == this.updatedAt);
@@ -506,12 +541,14 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
 class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
   final Value<int> id;
   final Value<int> cardsRequired;
+  final Value<int> dailyCardsGoal;
   final Value<int> unlockDurationMinutes;
   final Value<bool> isEnabled;
   final Value<int> updatedAt;
   const BlockRulesCompanion({
     this.id = const Value.absent(),
     this.cardsRequired = const Value.absent(),
+    this.dailyCardsGoal = const Value.absent(),
     this.unlockDurationMinutes = const Value.absent(),
     this.isEnabled = const Value.absent(),
     this.updatedAt = const Value.absent(),
@@ -519,6 +556,7 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
   BlockRulesCompanion.insert({
     this.id = const Value.absent(),
     this.cardsRequired = const Value.absent(),
+    this.dailyCardsGoal = const Value.absent(),
     this.unlockDurationMinutes = const Value.absent(),
     this.isEnabled = const Value.absent(),
     this.updatedAt = const Value.absent(),
@@ -526,6 +564,7 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
   static Insertable<BlockRule> custom({
     Expression<int>? id,
     Expression<int>? cardsRequired,
+    Expression<int>? dailyCardsGoal,
     Expression<int>? unlockDurationMinutes,
     Expression<bool>? isEnabled,
     Expression<int>? updatedAt,
@@ -533,6 +572,7 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (cardsRequired != null) 'cards_required': cardsRequired,
+      if (dailyCardsGoal != null) 'daily_cards_goal': dailyCardsGoal,
       if (unlockDurationMinutes != null)
         'unlock_duration_minutes': unlockDurationMinutes,
       if (isEnabled != null) 'is_enabled': isEnabled,
@@ -543,12 +583,14 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
   BlockRulesCompanion copyWith(
       {Value<int>? id,
       Value<int>? cardsRequired,
+      Value<int>? dailyCardsGoal,
       Value<int>? unlockDurationMinutes,
       Value<bool>? isEnabled,
       Value<int>? updatedAt}) {
     return BlockRulesCompanion(
       id: id ?? this.id,
       cardsRequired: cardsRequired ?? this.cardsRequired,
+      dailyCardsGoal: dailyCardsGoal ?? this.dailyCardsGoal,
       unlockDurationMinutes:
           unlockDurationMinutes ?? this.unlockDurationMinutes,
       isEnabled: isEnabled ?? this.isEnabled,
@@ -564,6 +606,9 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
     }
     if (cardsRequired.present) {
       map['cards_required'] = Variable<int>(cardsRequired.value);
+    }
+    if (dailyCardsGoal.present) {
+      map['daily_cards_goal'] = Variable<int>(dailyCardsGoal.value);
     }
     if (unlockDurationMinutes.present) {
       map['unlock_duration_minutes'] =
@@ -583,6 +628,7 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
     return (StringBuffer('BlockRulesCompanion(')
           ..write('id: $id, ')
           ..write('cardsRequired: $cardsRequired, ')
+          ..write('dailyCardsGoal: $dailyCardsGoal, ')
           ..write('unlockDurationMinutes: $unlockDurationMinutes, ')
           ..write('isEnabled: $isEnabled, ')
           ..write('updatedAt: $updatedAt')
@@ -1398,6 +1444,7 @@ typedef $$BlockedAppsTableProcessedTableManager = ProcessedTableManager<
 typedef $$BlockRulesTableCreateCompanionBuilder = BlockRulesCompanion Function({
   Value<int> id,
   Value<int> cardsRequired,
+  Value<int> dailyCardsGoal,
   Value<int> unlockDurationMinutes,
   Value<bool> isEnabled,
   Value<int> updatedAt,
@@ -1405,6 +1452,7 @@ typedef $$BlockRulesTableCreateCompanionBuilder = BlockRulesCompanion Function({
 typedef $$BlockRulesTableUpdateCompanionBuilder = BlockRulesCompanion Function({
   Value<int> id,
   Value<int> cardsRequired,
+  Value<int> dailyCardsGoal,
   Value<int> unlockDurationMinutes,
   Value<bool> isEnabled,
   Value<int> updatedAt,
@@ -1424,6 +1472,10 @@ class $$BlockRulesTableFilterComposer
 
   ColumnFilters<int> get cardsRequired => $composableBuilder(
       column: $table.cardsRequired, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get dailyCardsGoal => $composableBuilder(
+      column: $table.dailyCardsGoal,
+      builder: (column) => ColumnFilters(column));
 
   ColumnFilters<int> get unlockDurationMinutes => $composableBuilder(
       column: $table.unlockDurationMinutes,
@@ -1452,6 +1504,10 @@ class $$BlockRulesTableOrderingComposer
       column: $table.cardsRequired,
       builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<int> get dailyCardsGoal => $composableBuilder(
+      column: $table.dailyCardsGoal,
+      builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<int> get unlockDurationMinutes => $composableBuilder(
       column: $table.unlockDurationMinutes,
       builder: (column) => ColumnOrderings(column));
@@ -1477,6 +1533,9 @@ class $$BlockRulesTableAnnotationComposer
 
   GeneratedColumn<int> get cardsRequired => $composableBuilder(
       column: $table.cardsRequired, builder: (column) => column);
+
+  GeneratedColumn<int> get dailyCardsGoal => $composableBuilder(
+      column: $table.dailyCardsGoal, builder: (column) => column);
 
   GeneratedColumn<int> get unlockDurationMinutes => $composableBuilder(
       column: $table.unlockDurationMinutes, builder: (column) => column);
@@ -1513,6 +1572,7 @@ class $$BlockRulesTableTableManager extends RootTableManager<
           updateCompanionCallback: ({
             Value<int> id = const Value.absent(),
             Value<int> cardsRequired = const Value.absent(),
+            Value<int> dailyCardsGoal = const Value.absent(),
             Value<int> unlockDurationMinutes = const Value.absent(),
             Value<bool> isEnabled = const Value.absent(),
             Value<int> updatedAt = const Value.absent(),
@@ -1520,6 +1580,7 @@ class $$BlockRulesTableTableManager extends RootTableManager<
               BlockRulesCompanion(
             id: id,
             cardsRequired: cardsRequired,
+            dailyCardsGoal: dailyCardsGoal,
             unlockDurationMinutes: unlockDurationMinutes,
             isEnabled: isEnabled,
             updatedAt: updatedAt,
@@ -1527,6 +1588,7 @@ class $$BlockRulesTableTableManager extends RootTableManager<
           createCompanionCallback: ({
             Value<int> id = const Value.absent(),
             Value<int> cardsRequired = const Value.absent(),
+            Value<int> dailyCardsGoal = const Value.absent(),
             Value<int> unlockDurationMinutes = const Value.absent(),
             Value<bool> isEnabled = const Value.absent(),
             Value<int> updatedAt = const Value.absent(),
@@ -1534,6 +1596,7 @@ class $$BlockRulesTableTableManager extends RootTableManager<
               BlockRulesCompanion.insert(
             id: id,
             cardsRequired: cardsRequired,
+            dailyCardsGoal: dailyCardsGoal,
             unlockDurationMinutes: unlockDurationMinutes,
             isEnabled: isEnabled,
             updatedAt: updatedAt,

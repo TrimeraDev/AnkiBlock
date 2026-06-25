@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/di/providers.dart';
 import '../../core/services/ankidroid_service.dart';
+import '../../core/theme/app_theme.dart';
 
 /// Connection page for the AnkiDroid bridge.
 ///
@@ -122,7 +123,7 @@ class _Body extends ConsumerWidget {
             'All studying happens in AnkiDroid — AnkiBlock reads your due '
             'counts and opens the native reviewer when you tap Study or hit '
             'a blocked-app gate.',
-            style: TextStyle(color: Colors.grey),
+            style: TextStyle(color: AppTheme.onSurfaceVariant),
           ),
         ),
       ],
@@ -164,19 +165,19 @@ class _StatusTile extends ConsumerWidget {
     final (icon, color, title, subtitle) = switch (status) {
       AnkiDroidStatus(installed: false) => (
         Icons.cancel_outlined,
-        Colors.grey,
+        AppTheme.onSurfaceVariant,
         'AnkiDroid not installed',
         'Install it from the Play Store to enable AnkiBlock.',
       ),
       AnkiDroidStatus(installed: true, permissionGranted: false) => (
         Icons.lock_outline,
-        Colors.orange,
+        AppTheme.warning,
         'Permission required',
         'AnkiDroid is installed but has not granted us database access yet.',
       ),
       AnkiDroidStatus(installed: true, permissionGranted: true) => (
         Icons.check_circle_outline,
-        Colors.green,
+        AppTheme.success,
         'Connected',
         'AnkiBlock can read your decks and open the AnkiDroid reviewer.',
       ),
@@ -209,7 +210,7 @@ class _SectionHeader extends StatelessWidget {
       child: Text(
         label.toUpperCase(),
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: Colors.grey[600],
+              color: AppTheme.onSurfaceVariant,
               letterSpacing: 1,
             ),
       ),

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/di/providers.dart';
 import '../../core/services/ankidroid_service.dart';
 import '../../core/services/study_scope_service.dart';
+import '../../core/theme/app_theme.dart';
 
 /// AnkiDroid decks listing with per-deck inclusion toggles.
 ///
@@ -166,7 +167,7 @@ class _ScopeHeader extends ConsumerWidget {
           Text(
             'Study scope',
             style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  color: Colors.grey[700],
+                  color: AppTheme.onSurfaceVariant,
                 ),
           ),
           const SizedBox(height: 8),
@@ -207,7 +208,7 @@ class _ScopeHeader extends ConsumerWidget {
                 'Pick one deck. AnkiBlock will only study cards from there.',
             },
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Colors.grey[600],
+                  color: AppTheme.onSurfaceVariant,
                 ),
           ),
         ],
@@ -236,7 +237,7 @@ class _DeckRow extends ConsumerWidget {
           leading: const Icon(Icons.style_outlined),
           title: Text(deck.name),
           subtitle: Text(subtitle),
-          trailing: const Icon(Icons.check, color: Colors.green),
+          trailing: const Icon(Icons.check, color: AppTheme.success),
         );
       case StudyScopeMode.multi:
         return SwitchListTile(

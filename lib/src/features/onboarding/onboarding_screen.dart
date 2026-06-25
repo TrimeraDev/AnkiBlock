@@ -5,6 +5,9 @@ import 'package:go_router/go_router.dart';
 import '../../core/di/providers.dart';
 import '../../core/navigation/router.dart';
 import '../../core/services/ankidroid_service.dart';
+import '../../core/theme/app_theme.dart';
+import '../../core/widgets/brand_widgets.dart';
+import '../../core/widgets/setup_panels.dart';
 
 class OnboardingScreen extends ConsumerStatefulWidget {
   const OnboardingScreen({super.key});
@@ -15,16 +18,13 @@ class OnboardingScreen extends ConsumerStatefulWidget {
 
 class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
     with WidgetsBindingObserver {
-  static const _pageCount = 5;
+  static const _pageCount = 8;
 
   final _controller = PageController();
   int _page = 0;
 
-  // AnkiDroid
   bool _ankiInstalled = false;
   bool _ankiPermission = false;
-
-  // App-blocker
   bool _hasUsage = false;
   bool _hasOverlay = false;
   bool _hasNotification = false;
@@ -34,6 +34,10 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _refresh();
+    // Warm app list for the block-apps step.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(installedAppsProvider.future);
+    });
   }
 
   @override
@@ -86,6 +90,9 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
     final perm = ref.read(permissionServiceProvider);
     final anki = ref.read(ankiDroidServiceProvider);
     final ankiReady = _ankiInstalled && _ankiPermission;
+    final ruleAsync = ref.watch(blockRuleProvider);
+    final dailyGoal = ruleAsync.valueOrNull?.dailyCardsGoal ?? 30;
+    final unlockGoal = ruleAsync.valueOrNull?.cardsRequired ?? 10;
 
     return Scaffold(
       body: SafeArea(
@@ -96,24 +103,20 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
                 controller: _controller,
                 onPageChanged: (i) => setState(() => _page = i),
                 children: [
-                  const _IntroPage(
-                    icon: Icons.school_outlined,
-                    title: 'Welcome to AnkiBlock',
-                    body:
-                        'Block distracting apps and unlock them by studying flashcards. '
-                        'AnkiBlock uses your AnkiDroid collection — install AnkiDroid '
-                        'first if you do not already have it.',
-                  ),
+                  const _IntroPage(),
                   _PermissionPage(
                     icon: Icons.sync,
-                    title: 'Connect AnkiDroid',
+                    title: 'Built for AnkiDroid',
                     body: !_ankiInstalled
-                        ? 'AnkiDroid is required. Tap "Install" to open the Play Store.'
+                        ? 'AnkiDroid must be installed. AnkiBlock connects to '
+                            'AnkiDroid and uses your real study progress to '
+                            'unlock apps.'
                         : !_ankiPermission
-                            ? 'AnkiDroid is installed. Grant the database '
-                                'permission so AnkiBlock can read your decks.'
+                            ? 'AnkiDroid is installed. Grant database access '
+                                'so AnkiBlock can read your decks and due counts.'
                             : 'AnkiBlock is connected to your AnkiDroid collection.',
                     granted: ankiReady,
+                    showAnkiBadge: true,
                     actionLabel: !_ankiInstalled
                         ? 'Install AnkiDroid'
                         : 'Grant access',
@@ -135,8 +138,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
                     icon: Icons.visibility_outlined,
                     title: 'Allow Usage Access',
                     body:
-                        'AnkiBlock needs Usage Access to detect when you open a blocked app. '
-                        'It does not collect or upload any data.',
+                        'AnkiBlock needs Usage Access to detect when you open a '
+                        'blocked app. Your data stays on your device.',
                     granted: _hasUsage,
                     actionLabel: 'Open settings',
                     onAction: () async {
@@ -148,8 +151,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
                     icon: Icons.layers_outlined,
                     title: 'Allow Display Over Apps',
                     body:
-                        'This lets the study gate appear instantly when you open a blocked app, '
-                        'without you having to launch AnkiBlock manually.',
+                        'This lets the study gate appear instantly when you open '
+                        'a blocked app — no need to launch AnkiBlock manually.',
                     granted: _hasOverlay,
                     actionLabel: 'Open settings',
                     onAction: () async {
@@ -157,11 +160,45 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
                       await _refresh();
                     },
                   ),
+                  _SetupScrollPage(
+                    title: 'Block your worst apps',
+                    subtitle:
+                        'Toggle the apps that should stay locked until you study.',
+                    child: const AppBlockSetupPanel(suggestedOnly: true),
+                  ),
+                  _SetupScrollPage(
+                    title: 'Choose decks to study',
+                    subtitle:
+                        'Only cards from these AnkiDroid decks count toward unlocking.',
+                    child: const DeckStudySetupPanel(),
+                  ),
+                  _SetupScrollPage(
+                    title: 'Set your goals',
+                    subtitle:
+                        'Hit your daily goal to unlock everything until 3am. '
+                        'Otherwise study a smaller batch each time you open a '
+                        'blocked app.',
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        DailyGoalPanel(
+                          initial: dailyGoal,
+                          showTitle: false,
+                        ),
+                        const SizedBox(height: 24),
+                        UnlockGoalPanel(
+                          initial: unlockGoal,
+                          showTitle: false,
+                        ),
+                      ],
+                    ),
+                  ),
                   _PermissionPage(
                     icon: Icons.notifications_outlined,
                     title: 'Notifications (optional)',
                     body:
-                        'Get reminders when reviews are due and when an unlock is about to expire.',
+                        'Get reminders when reviews are due and when an unlock '
+                        'is about to expire.',
                     granted: _hasNotification,
                     actionLabel: 'Allow notifications',
                     onAction: () async {
@@ -182,10 +219,20 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
                     child: const Text('Skip'),
                   ),
                   const Spacer(),
-                  FilledButton(
-                    onPressed: _next,
-                    child: Text(_page == _pageCount - 1 ? 'Done' : 'Next'),
-                  ),
+                  if (_page == _pageCount - 1)
+                    Expanded(
+                      child: GradientButton(
+                        expand: true,
+                        onPressed: _next,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        child: const Text('Get Started'),
+                      ),
+                    )
+                  else
+                    FilledButton(
+                      onPressed: _next,
+                      child: const Text('Next'),
+                    ),
                 ],
               ),
             ),
@@ -196,16 +243,42 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
   }
 }
 
-class _IntroPage extends StatelessWidget {
-  final IconData icon;
+class _SetupScrollPage extends StatelessWidget {
   final String title;
-  final String body;
+  final String subtitle;
+  final Widget child;
 
-  const _IntroPage({
-    required this.icon,
+  const _SetupScrollPage({
     required this.title,
-    required this.body,
+    required this.subtitle,
+    required this.child,
   });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+      children: [
+        Text(
+          title,
+          style: Theme.of(context).textTheme.headlineMedium,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          subtitle,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: AppTheme.onSurfaceVariant,
+              ),
+        ),
+        const SizedBox(height: 20),
+        child,
+      ],
+    );
+  }
+}
+
+class _IntroPage extends StatelessWidget {
+  const _IntroPage();
 
   @override
   Widget build(BuildContext context) {
@@ -214,18 +287,29 @@ class _IntroPage extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, size: 96),
-          const SizedBox(height: 24),
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.headlineMedium,
+          Image.asset(
+            'lib/src/assets/logo.png',
+            width: 96,
+            height: 96,
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 24),
+          const AnkiBlockWordmark(),
+          const SizedBox(height: 12),
+          const AccentHeadline(
+            before: 'Study first. ',
+            accent: 'Unlock freedom.',
+          ),
+          const SizedBox(height: 20),
           Text(
-            body,
+            'AnkiBlock blocks your most distracting apps until you complete '
+            'your Anki cards in AnkiDroid.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyLarge,
+          ),
+          const SizedBox(height: 16),
+          const BrandBadge(
+            label: 'Requires AnkiDroid',
+            icon: Icons.info_outline,
           ),
         ],
       ),
@@ -238,6 +322,7 @@ class _PermissionPage extends StatelessWidget {
   final String title;
   final String body;
   final bool granted;
+  final bool showAnkiBadge;
   final String actionLabel;
   final Future<void> Function() onAction;
 
@@ -246,6 +331,7 @@ class _PermissionPage extends StatelessWidget {
     required this.title,
     required this.body,
     required this.granted,
+    this.showAnkiBadge = false,
     required this.actionLabel,
     required this.onAction,
   });
@@ -257,13 +343,25 @@ class _PermissionPage extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, size: 96),
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: AppTheme.cardElevated,
+              shape: BoxShape.circle,
+              border: Border.all(color: AppTheme.divider),
+            ),
+            child: Icon(icon, size: 48, color: AppTheme.accent),
+          ),
           const SizedBox(height: 24),
           Text(
             title,
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.headlineMedium,
           ),
+          if (showAnkiBadge) ...[
+            const SizedBox(height: 12),
+            const BrandBadge(label: 'Requires AnkiDroid', icon: Icons.sync),
+          ],
           const SizedBox(height: 16),
           Text(
             body,
@@ -292,15 +390,16 @@ class _GrantedPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.green.shade100,
+        color: AppTheme.success.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppTheme.success.withValues(alpha: 0.35)),
       ),
       child: const Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.check_circle, color: Colors.green, size: 18),
+          Icon(Icons.check_circle, color: AppTheme.success, size: 18),
           SizedBox(width: 6),
-          Text('Granted', style: TextStyle(color: Colors.green)),
+          Text('Granted', style: TextStyle(color: AppTheme.success)),
         ],
       ),
     );
@@ -324,9 +423,7 @@ class _PageDots extends StatelessWidget {
           width: selected ? 18 : 8,
           height: 8,
           decoration: BoxDecoration(
-            color: selected
-                ? Theme.of(context).colorScheme.primary
-                : Theme.of(context).dividerColor,
+            color: selected ? AppTheme.accent : AppTheme.cardElevated,
             borderRadius: BorderRadius.circular(4),
           ),
         );

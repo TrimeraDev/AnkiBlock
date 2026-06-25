@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/di/providers.dart';
+import '../../core/theme/app_theme.dart';
 
 class PermissionsScreen extends ConsumerStatefulWidget {
   const PermissionsScreen({super.key});
@@ -125,7 +126,7 @@ class _PermissionTile extends StatelessWidget {
       title: Text(title),
       subtitle: Text(subtitle),
       trailing: granted
-          ? const Icon(Icons.check_circle, color: Colors.green)
+          ? const Icon(Icons.check_circle, color: AppTheme.success)
           : ElevatedButton(
               onPressed: onRequest,
               child: const Text('Grant'),

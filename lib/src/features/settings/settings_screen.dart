@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/database/database.dart';
 import '../../core/di/providers.dart';
+import '../../core/setup/setup_actions.dart';
+import '../../core/theme/app_theme.dart';
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
@@ -29,7 +31,8 @@ class SettingsScreen extends ConsumerWidget {
   }
 
   Widget _buildList(BuildContext context, WidgetRef ref, BlockRule? rule) {
-    final cards = rule?.cardsRequired ?? 5;
+    final cards = rule?.cardsRequired ?? 10;
+    final daily = rule?.dailyCardsGoal ?? 30;
     final minutes = rule?.unlockDurationMinutes ?? 10;
     final enabled = rule?.isEnabled ?? true;
 
@@ -64,19 +67,30 @@ class SettingsScreen extends ConsumerWidget {
           onTap: () => context.push('/decks'),
         ),
         const Divider(),
-        const _SectionHeader(label: 'Unlock rule'),
-        SwitchListTile(
-          secondary: const Icon(Icons.shield_outlined),
-          title: const Text('Blocking enabled'),
-          subtitle: const Text(
-              'When off, blocked apps open without requiring a study session.'),
-          value: enabled,
-          onChanged: (v) => _save(ref, isEnabled: Value(v)),
+        const _SectionHeader(label: 'Study goals'),
+        ListTile(
+          leading: const Icon(Icons.calendar_today_outlined),
+          title: const Text('Daily goal'),
+          subtitle: Text('$daily cards · unlocks all apps until 3am'),
+          onTap: () async {
+            final result = await _pickInt(
+              context,
+              title: 'Daily goal',
+              initial: daily,
+              min: 5,
+              max: 200,
+              suffix: 'cards',
+            );
+            if (result != null) {
+              _save(ref, dailyCardsGoal: Value(result));
+              await syncDailyGoalToNative(ref);
+            }
+          },
         ),
         ListTile(
           leading: const Icon(Icons.tune),
-          title: const Text('Cards per unlock'),
-          subtitle: Text('$cards cards'),
+          title: const Text('Unlock goal'),
+          subtitle: Text('$cards cards per blocked app'),
           onTap: () async {
             final result = await _pickInt(
               context,
@@ -89,10 +103,18 @@ class SettingsScreen extends ConsumerWidget {
             if (result != null) _save(ref, cardsRequired: Value(result));
           },
         ),
+        SwitchListTile(
+          secondary: const Icon(Icons.shield_outlined),
+          title: const Text('Blocking enabled'),
+          subtitle: const Text(
+              'When off, blocked apps open without requiring a study session.'),
+          value: enabled,
+          onChanged: (v) => _save(ref, isEnabled: Value(v)),
+        ),
         ListTile(
           leading: const Icon(Icons.timer_outlined),
-          title: const Text('Unlock duration'),
-          subtitle: Text('$minutes minutes'),
+          title: const Text('Per-app unlock grace'),
+          subtitle: Text('$minutes minutes after a gate unlock'),
           onTap: () async {
             final result = await _pickInt(
               context,
@@ -121,6 +143,7 @@ class SettingsScreen extends ConsumerWidget {
   Future<void> _save(
     WidgetRef ref, {
     Value<int>? cardsRequired,
+    Value<int>? dailyCardsGoal,
     Value<int>? unlockDurationMinutes,
     Value<bool>? isEnabled,
   }) async {
@@ -128,10 +151,12 @@ class SettingsScreen extends ConsumerWidget {
     await db.updateBlockRule(BlockRulesCompanion(
       id: const Value(1),
       cardsRequired: cardsRequired ?? const Value.absent(),
+      dailyCardsGoal: dailyCardsGoal ?? const Value.absent(),
       unlockDurationMinutes: unlockDurationMinutes ?? const Value.absent(),
       isEnabled: isEnabled ?? const Value.absent(),
       updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
     ));
+    ref.invalidate(blockRuleProvider);
   }
 
   Future<int?> _pickInt(
@@ -192,7 +217,7 @@ class _SectionHeader extends StatelessWidget {
       child: Text(
         label.toUpperCase(),
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: Colors.grey[600],
+              color: AppTheme.onSurfaceVariant,
               letterSpacing: 1,
             ),
       ),

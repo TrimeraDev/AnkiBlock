@@ -22,7 +22,7 @@ import androidx.core.app.NotificationCompat
  * to the study gate.
  *
  * During a delegated AnkiDroid study session, polls every 500 ms and tracks
- * due-count delta via AnkiDroid's ContentProvider.
+ * valid reviews via per-card reps/lapses (Again presses are excluded).
  */
 class AppMonitorService : Service() {
 
@@ -44,6 +44,25 @@ class AppMonitorService : Service() {
         const val KEY_DELEGATED_BASELINE = "delegated_baseline"
         const val KEY_DELEGATED_CARD_KEYS = "delegated_card_keys"
         const val KEY_DELEGATED_COMPLETE_STREAK = "delegated_complete_streak"
+        const val KEY_DELEGATED_STARTED_AT = "delegated_started_at"
+
+        const val KEY_DAILY_GOAL = "daily_goal"
+        const val KEY_DAILY_REVIEWED = "daily_cards_reviewed"
+        const val KEY_STUDY_DAY = "study_day_key"
+        const val KEY_PASSIVE_APPLIED_TO_DAILY = "passive_applied_to_daily"
+
+        /** Scoped deck ids for passive AnkiDroid study tracking. */
+        const val KEY_SCOPE_DECK_IDS = "scope_deck_ids"
+
+        const val KEY_PASSIVE_STUDY_DAY = "passive_study_day"
+        const val KEY_PASSIVE_CARD_KEYS = "passive_card_keys"
+        const val KEY_PASSIVE_CREDITED_TOTAL = "passive_credited_total"
+
+        /** Snapshot size when seeding passive card tracking. */
+        const val PASSIVE_SNAPSHOT_LIMIT = 30
+
+        /** Voluntary study from the home screen — track cards, no app unlock. */
+        const val PRACTICE_PACKAGE = "__ankiblock_practice__"
 
         private const val TAG = "AnkiBlock.Delegate"
 
@@ -72,6 +91,70 @@ class AppMonitorService : Service() {
         fun grantTempUnlock(context: Context, pkg: String) {
             val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             prefs.edit().putLong("unlock_$pkg", System.currentTimeMillis()).apply()
+        }
+
+        fun setDailyGoalState(
+            context: Context,
+            studyDayKey: String,
+            dailyGoal: Int,
+            cardsReviewed: Int,
+        ) {
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val editor = prefs.edit()
+                .putString(KEY_STUDY_DAY, studyDayKey)
+                .putInt(KEY_DAILY_GOAL, dailyGoal)
+                .putInt(KEY_DAILY_REVIEWED, cardsReviewed)
+            // Only advance the passive merge watermark — never reset it to the
+            // full daily total (that blocked organic study after gate sessions).
+            val passiveMerged = prefs.getInt(KEY_PASSIVE_APPLIED_TO_DAILY, 0)
+            val passiveTotal = prefs.getInt(KEY_PASSIVE_CREDITED_TOTAL, 0)
+            if (passiveTotal > passiveMerged) {
+                editor.putInt(KEY_PASSIVE_APPLIED_TO_DAILY, passiveTotal)
+            }
+            editor.apply()
+        }
+
+        fun setStudyScopeDeckIds(context: Context, deckIds: List<Long>) {
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            prefs.edit()
+                .putString(KEY_SCOPE_DECK_IDS, deckIds.joinToString(","))
+                .apply()
+        }
+
+        fun getDailyGoalState(context: Context): Map<String, Any> {
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            return mapOf(
+                "studyDayKey" to (prefs.getString(KEY_STUDY_DAY, "") ?: ""),
+                "dailyGoal" to prefs.getInt(KEY_DAILY_GOAL, 0),
+                "cardsReviewed" to prefs.getInt(KEY_DAILY_REVIEWED, 0),
+            )
+        }
+
+        private fun parseScopeDeckIds(raw: String?): List<Long> {
+            if (raw.isNullOrBlank()) return emptyList()
+            return raw.split(",")
+                .mapNotNull { it.trim().toLongOrNull() }
+        }
+
+        /** Study day rolls over at 3:00 AM local time. */
+        fun studyDayKey(nowMs: Long = System.currentTimeMillis()): String {
+            val cal = java.util.Calendar.getInstance()
+            cal.timeInMillis = nowMs
+            cal.add(java.util.Calendar.HOUR_OF_DAY, -3)
+            return String.format(
+                "%04d-%02d-%02d",
+                cal.get(java.util.Calendar.YEAR),
+                cal.get(java.util.Calendar.MONTH) + 1,
+                cal.get(java.util.Calendar.DAY_OF_MONTH),
+            )
+        }
+
+        fun isDailyGoalComplete(prefs: SharedPreferences): Boolean {
+            val goal = prefs.getInt(KEY_DAILY_GOAL, 0)
+            if (goal <= 0) return false
+            val day = prefs.getString(KEY_STUDY_DAY, null)
+            if (day.isNullOrBlank() || day != studyDayKey()) return false
+            return prefs.getInt(KEY_DAILY_REVIEWED, 0) >= goal
         }
 
         /** Closes the study-gate [MainActivity] and removes it from recents. */
@@ -109,6 +192,8 @@ class AppMonitorService : Service() {
                 .putInt(KEY_DELEGATED_TARGET, target)
                 .putInt(KEY_DELEGATED_BASELINE, baseline)
                 .putInt(KEY_DELEGATED_COMPLETE_STREAK, 0)
+                .putLong(KEY_DELEGATED_STARTED_AT, System.currentTimeMillis())
+                .remove(KEY_DELEGATED_CARD_KEYS)
                 .apply()
         }
 
@@ -127,6 +212,7 @@ class AppMonitorService : Service() {
                 .remove(KEY_DELEGATED_BASELINE)
                 .remove(KEY_DELEGATED_CARD_KEYS)
                 .remove(KEY_DELEGATED_COMPLETE_STREAK)
+                .remove(KEY_DELEGATED_STARTED_AT)
                 .apply()
         }
 
@@ -150,6 +236,10 @@ class AppMonitorService : Service() {
     private var pollStart = 0L
     private lateinit var overlayManager: CompletionOverlayManager
     private var ankiApi: AnkiDroidApi? = null
+    private val keyTrackers = mutableMapOf<String, AnkiDroidApi.KeyTracker>()
+    private val passiveKeyTrackers = mutableMapOf<String, AnkiDroidApi.KeyTracker>()
+    private var lastReportedProgress = -1
+    private var lastPassiveWatching = false
 
     private val pollRunnable = object : Runnable {
         override fun run() {
@@ -157,10 +247,10 @@ class AppMonitorService : Service() {
                 tick()
             } catch (_: Throwable) {
             }
-            val interval = if (hasDelegatedSession(prefs)) {
-                POLL_MS_DELEGATED
-            } else {
-                POLL_MS_IDLE
+            val interval = when {
+                hasDelegatedSession(prefs) -> POLL_MS_DELEGATED
+                currentForegroundPackage == ANKIDROID_PACKAGE -> POLL_MS_DELEGATED
+                else -> POLL_MS_IDLE
             }
             handler.postDelayed(this, interval)
         }
@@ -174,9 +264,33 @@ class AppMonitorService : Service() {
         overlayManager = CompletionOverlayManager(this)
         ankiApi = AnkiDroidApi(applicationContext)
         createChannel()
+        clearStaleDelegatedSession()
+        repairPassiveMergeState()
         startForeground(NOTIFICATION_ID, buildNotification())
-        pollStart = System.currentTimeMillis() - 10_000
+        pollStart = System.currentTimeMillis() - 60_000
+        currentForegroundPackage = queryMostRecentForegroundPackage()
         handler.post(pollRunnable)
+    }
+
+    private fun clearStaleDelegatedSession() {
+        if (!hasDelegatedSession(prefs)) return
+        val startedAt = prefs.getLong(KEY_DELEGATED_STARTED_AT, 0L)
+        val age = System.currentTimeMillis() - startedAt
+        if (startedAt == 0L || age > 30 * 60 * 1000L) {
+            Log.i(TAG, "clearing stale delegated session (age=${age}ms)")
+            clearDelegatedSession(this)
+            keyTrackers.clear()
+        }
+    }
+
+    /** Fixes watermark left by older builds that reset passive merge to daily total. */
+    private fun repairPassiveMergeState() {
+        val passiveTotal = prefs.getInt(KEY_PASSIVE_CREDITED_TOTAL, 0)
+        val merged = prefs.getInt(KEY_PASSIVE_APPLIED_TO_DAILY, 0)
+        if (merged > passiveTotal) {
+            prefs.edit().putInt(KEY_PASSIVE_APPLIED_TO_DAILY, passiveTotal).apply()
+            Log.i(TAG, "repaired passive merge watermark $merged -> $passiveTotal")
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -188,6 +302,8 @@ class AppMonitorService : Service() {
         if (intent?.action == ACTION_DELEGATED_START) {
             currentForegroundPackage = ANKIDROID_PACKAGE
             prefs.edit().remove(KEY_DELEGATED_CARD_KEYS).apply()
+            keyTrackers.clear()
+            lastReportedProgress = -1
             Log.i(TAG, "delegated session started — expecting AnkiDroid foreground")
         }
         return START_STICKY
@@ -212,14 +328,16 @@ class AppMonitorService : Service() {
         }
     }
 
-    private fun buildNotification() =
+    private fun buildNotification(progressText: String? = null) =
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("AnkiBlock active")
             .setContentText(
-                if (hasDelegatedSession(prefs)) {
-                    "Watching your AnkiDroid study session"
-                } else {
-                    "Watching for blocked apps"
+                progressText ?: when {
+                    hasDelegatedSession(prefs) ->
+                        "Watching your AnkiDroid study session"
+                    currentForegroundPackage == ANKIDROID_PACKAGE ->
+                        "Counting AnkiDroid study toward your daily goal"
+                    else -> "Watching for blocked apps"
                 },
             )
             .setSmallIcon(android.R.drawable.ic_lock_lock)
@@ -227,10 +345,26 @@ class AppMonitorService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
 
+    private fun reportProgressIfChanged(completed: Int, target: Int) {
+        if (completed == lastReportedProgress) return
+        lastReportedProgress = completed
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.notify(
+            NOTIFICATION_ID,
+            buildNotification("Studied $completed of $target cards"),
+        )
+        MainActivity.notifyFlutter(
+            "onDelegatedProgress",
+            mapOf("completed" to completed, "target" to target),
+        )
+    }
+
     private fun tick() {
         val foreground = queryLatestForegroundPackage()
         if (hasDelegatedSession(prefs)) {
             checkDelegatedProgress(foreground)
+        } else {
+            checkPassiveStudy(foreground)
         }
         checkBlockedAppGate(foreground)
     }
@@ -252,24 +386,215 @@ class AppMonitorService : Service() {
             }
         }
         pollStart = now
-        // Usage events only fire on app switches. While the user stays in
-        // AnkiDroid there are no new events — keep the last known foreground.
         if (latestPkg != null) {
             currentForegroundPackage = latestPkg
+        } else if (currentForegroundPackage == null) {
+            currentForegroundPackage = queryMostRecentForegroundPackage()
         }
         return currentForegroundPackage
     }
 
+    /** Best-effort current foreground when usage events have not fired yet. */
+    private fun queryMostRecentForegroundPackage(): String? {
+        return try {
+            val usm = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+            val now = System.currentTimeMillis()
+            val stats = usm.queryUsageStats(
+                UsageStatsManager.INTERVAL_BEST,
+                now - 120_000,
+                now,
+            ) ?: return null
+            stats.maxByOrNull { it.lastTimeUsed }?.packageName
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    /** Credits organic AnkiDroid study toward the daily goal (no delegated session). */
+    private fun checkPassiveStudy(foreground: String?) {
+        if (foreground != ANKIDROID_PACKAGE) {
+            if (lastPassiveWatching) {
+                consolidatePassiveTrackers()
+                lastPassiveWatching = false
+                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                nm.notify(NOTIFICATION_ID, buildNotification())
+            }
+            return
+        }
+
+        val api = ankiApi ?: return
+        if (!api.hasPermission()) {
+            Log.w(TAG, "passive skipped — AnkiDroid READ_WRITE_DATABASE not granted")
+            return
+        }
+
+        ensurePassiveStudyDay()
+        val deckIds = resolvePassiveDeckIds(api)
+        if (deckIds.isEmpty()) {
+            Log.w(TAG, "passive skipped — no scoped decks (sync deck scope in AnkiBlock)")
+            return
+        }
+
+        if (!lastPassiveWatching) {
+            lastPassiveWatching = true
+            Log.i(TAG, "passive watching AnkiDroid decks=$deckIds")
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.notify(NOTIFICATION_ID, buildNotification())
+        }
+
+        ensurePassiveSnapshot(api, deckIds)
+        expandPassiveKeys(api, deckIds)
+
+        val keys = prefs.getString(KEY_PASSIVE_CARD_KEYS, null)
+            ?.split(",")
+            ?.filter { it.isNotBlank() }
+            ?: emptyList()
+        if (keys.isEmpty()) {
+            Log.d(TAG, "passive skipped — schedule snapshot empty for decks=$deckIds")
+            return
+        }
+
+        val inMemoryCredited = try {
+            api.countValidReviews(keys, passiveKeyTrackers)
+        } catch (e: Exception) {
+            Log.w(TAG, "passive reps poll failed", e)
+            0
+        }
+
+        val persistedCredited = prefs.getInt(KEY_PASSIVE_CREDITED_TOTAL, 0)
+        val passiveTotal = persistedCredited + inMemoryCredited
+        val lastMerged = prefs.getInt(KEY_PASSIVE_APPLIED_TO_DAILY, 0)
+        if (passiveTotal <= lastMerged) return
+
+        val delta = passiveTotal - lastMerged
+        val newDaily = prefs.getInt(KEY_DAILY_REVIEWED, 0) + delta
+        prefs.edit()
+            .putInt(KEY_DAILY_REVIEWED, newDaily)
+            .putInt(KEY_PASSIVE_APPLIED_TO_DAILY, passiveTotal)
+            .apply()
+
+        Log.i(TAG, "passive study +$delta cards (daily=$newDaily passiveTotal=$passiveTotal)")
+
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val goal = prefs.getInt(KEY_DAILY_GOAL, 0)
+        val progressText = if (goal > 0 && newDaily >= goal) {
+            "Studied $newDaily cards today"
+        } else {
+            "Daily goal: $newDaily / $goal cards"
+        }
+        nm.notify(
+            NOTIFICATION_ID,
+            buildNotification(progressText),
+        )
+        MainActivity.notifyFlutter(
+            "onPassiveStudyProgress",
+            mapOf("delta" to delta, "cardsReviewed" to newDaily),
+        )
+    }
+
+    private fun resolvePassiveDeckIds(api: AnkiDroidApi): List<Long> {
+        val scoped = parseScopeDeckIds(prefs.getString(KEY_SCOPE_DECK_IDS, null))
+        if (scoped.isNotEmpty()) return scoped
+        return try {
+            api.listDecks().mapNotNull { (it["id"] as? Number)?.toLong() }
+        } catch (e: Exception) {
+            Log.w(TAG, "passive deck fallback failed", e)
+            emptyList()
+        }
+    }
+
+    private fun ensurePassiveStudyDay() {
+        val today = studyDayKey()
+        val stored = prefs.getString(KEY_PASSIVE_STUDY_DAY, null)
+        if (stored == today) return
+        consolidatePassiveTrackers()
+        passiveKeyTrackers.clear()
+        prefs.edit()
+            .putString(KEY_PASSIVE_STUDY_DAY, today)
+            .remove(KEY_PASSIVE_CARD_KEYS)
+            .putInt(KEY_PASSIVE_CREDITED_TOTAL, 0)
+            .putInt(KEY_PASSIVE_APPLIED_TO_DAILY, 0)
+            .apply()
+    }
+
+    private fun consolidatePassiveTrackers() {
+        val sum = passiveKeyTrackers.values.sumOf { it.credited }
+        if (sum <= 0) return
+        val total = prefs.getInt(KEY_PASSIVE_CREDITED_TOTAL, 0) + sum
+        prefs.edit().putInt(KEY_PASSIVE_CREDITED_TOTAL, total).apply()
+        for (tracker in passiveKeyTrackers.values) {
+            tracker.credited = 0
+        }
+    }
+
+    private fun ensurePassiveSnapshot(api: AnkiDroidApi, deckIds: List<Long>) {
+        val existing = prefs.getString(KEY_PASSIVE_CARD_KEYS, null)
+        if (!existing.isNullOrBlank()) {
+            if (passiveKeyTrackers.isEmpty()) {
+                seedTrackers(
+                    api,
+                    existing.split(",").filter { it.isNotBlank() },
+                    passiveKeyTrackers,
+                )
+            }
+            return
+        }
+        val keys = linkedSetOf<String>()
+        for (deckId in deckIds) {
+            keys.addAll(api.scheduleCardKeys(deckId, PASSIVE_SNAPSHOT_LIMIT))
+        }
+        if (keys.isEmpty()) return
+        seedTrackers(api, keys.toList(), passiveKeyTrackers)
+        prefs.edit()
+            .putString(KEY_PASSIVE_CARD_KEYS, keys.joinToString(","))
+            .apply()
+        Log.i(TAG, "passive snapshot decks=$deckIds keys=${keys.size}")
+    }
+
+    private fun expandPassiveKeys(api: AnkiDroidApi, deckIds: List<Long>) {
+        val raw = prefs.getString(KEY_PASSIVE_CARD_KEYS, null) ?: return
+        val tracked = raw.split(",").filter { it.isNotBlank() }.toMutableSet()
+        val fresh = linkedSetOf<String>()
+        for (deckId in deckIds) {
+            fresh.addAll(api.scheduleCardKeys(deckId, PASSIVE_SNAPSHOT_LIMIT))
+        }
+        val added = fresh - tracked
+        if (added.isEmpty()) return
+        tracked.addAll(added)
+        seedTrackers(api, added.toList(), passiveKeyTrackers, clearExisting = false)
+        prefs.edit()
+            .putString(KEY_PASSIVE_CARD_KEYS, tracked.joinToString(","))
+            .apply()
+    }
+
     private fun checkDelegatedProgress(foreground: String?) {
-        val activePkg = foreground ?: return
+        var activePkg = foreground
+        if (activePkg == null && hasDelegatedSession(prefs)) {
+            val startedAt = prefs.getLong(KEY_DELEGATED_STARTED_AT, 0L)
+            if (startedAt > 0 &&
+                System.currentTimeMillis() - startedAt < 60_000
+            ) {
+                activePkg = ANKIDROID_PACKAGE
+            }
+        }
+        if (activePkg == null) return
         if (activePkg != ANKIDROID_PACKAGE) {
             prefs.edit().putInt(KEY_DELEGATED_COMPLETE_STREAK, 0).apply()
+            val startedAt = prefs.getLong(KEY_DELEGATED_STARTED_AT, 0L)
+            if (startedAt > 0 &&
+                System.currentTimeMillis() - startedAt > 10 * 60 * 1000L
+            ) {
+                Log.i(TAG, "clearing abandoned delegated session — left AnkiDroid")
+                clearDelegatedSession(this)
+                keyTrackers.clear()
+            }
             return
         }
 
         val pkg = prefs.getString(KEY_DELEGATED_PKG, null) ?: return
         val appName = prefs.getString(KEY_DELEGATED_APP_NAME, pkg) ?: pkg
         val target = prefs.getInt(KEY_DELEGATED_TARGET, 5)
+        val baseline = prefs.getInt(KEY_DELEGATED_BASELINE, 0)
         val deckId = prefs.getLong(KEY_DELEGATED_DECK_ID, -1L)
         if (deckId < 0) return
 
@@ -280,26 +605,32 @@ class AppMonitorService : Service() {
         }
 
         ensureSessionSnapshot(api, deckId, target)
+        expandTrackedKeys(api, deckId, target)
 
         val initialKeys = prefs.getString(KEY_DELEGATED_CARD_KEYS, null)
             ?.split(",")
             ?.filter { it.isNotBlank() }
             ?: emptyList()
-        if (initialKeys.isEmpty()) {
-            Log.w(TAG, "poll skipped — no schedule snapshot yet for deck $deckId")
-            return
+
+        val repsBased = if (initialKeys.isNotEmpty()) {
+            try {
+                api.countValidReviews(initialKeys, keyTrackers)
+            } catch (e: Exception) {
+                Log.w(TAG, "reps poll failed", e)
+                0
+            }
+        } else {
+            0
         }
 
-        val completed = try {
-            api.countReviewedFromSnapshot(
-                deckId,
-                initialKeys,
-                initialKeys.size + target,
-            )
+        val currentDue = try {
+            api.deckDueTotal(deckId)
         } catch (e: Exception) {
-            Log.w(TAG, "schedule poll failed", e)
-            return
+            Log.w(TAG, "due-count poll failed", e)
+            baseline
         }
+        val dueBased = (baseline - currentDue).coerceAtLeast(0)
+        val completed = maxOf(repsBased, dueBased).coerceAtMost(target)
 
         val streak = if (completed >= target) {
             prefs.getInt(KEY_DELEGATED_COMPLETE_STREAK, 0) + 1
@@ -308,23 +639,31 @@ class AppMonitorService : Service() {
         }
         prefs.edit().putInt(KEY_DELEGATED_COMPLETE_STREAK, streak).apply()
 
+        reportProgressIfChanged(completed, target)
+
         Log.d(
             TAG,
-            "poll fg=$activePkg completed=$completed/$target streak=$streak " +
-                "snapshot=${initialKeys.size} keys",
+            "poll fg=$activePkg completed=$completed/$target (reps=$repsBased due=$dueBased) " +
+                "streak=$streak snapshot=${initialKeys.size} keys baseline=$baseline now=$currentDue",
         )
 
         if (completed < target) return
         if (streak < 2) return
 
-        Log.i(TAG, "unlock earned — showing completion UI for $appName")
-        grantTempUnlock(this, pkg)
+        Log.i(TAG, "session complete — $completed cards for $appName")
+        keyTrackers.clear()
         clearDelegatedSession(this)
         dismissGateUi(this)
         MainActivity.notifyFlutter(
             "onDelegatedUnlock",
             mapOf("cardsCompleted" to completed),
         )
+
+        if (pkg == PRACTICE_PACKAGE) {
+            return
+        }
+
+        grantTempUnlock(this, pkg)
         overlayManager.show(
             appName = appName,
             packageName = pkg,
@@ -336,13 +675,54 @@ class AppMonitorService : Service() {
     /** Capture the first N schedule cards once AnkiDroid is in the foreground. */
     private fun ensureSessionSnapshot(api: AnkiDroidApi, deckId: Long, target: Int) {
         val existing = prefs.getString(KEY_DELEGATED_CARD_KEYS, null)
-        if (!existing.isNullOrBlank()) return
+        if (!existing.isNullOrBlank()) {
+            if (keyTrackers.isEmpty()) {
+                seedTrackers(api, existing.split(",").filter { it.isNotBlank() })
+            }
+            return
+        }
         val keys = api.scheduleCardKeys(deckId, target)
         if (keys.isEmpty()) return
+        seedTrackers(api, keys)
         prefs.edit()
             .putString(KEY_DELEGATED_CARD_KEYS, keys.joinToString(","))
             .apply()
         Log.i(TAG, "schedule snapshot deck=$deckId keys=$keys")
+    }
+
+    /** Pull newly-due cards into the tracked set as the user studies. */
+    private fun expandTrackedKeys(api: AnkiDroidApi, deckId: Long, target: Int) {
+        val raw = prefs.getString(KEY_DELEGATED_CARD_KEYS, null) ?: return
+        val tracked = raw.split(",").filter { it.isNotBlank() }.toMutableSet()
+        val fresh = api.scheduleCardKeys(deckId, target).toSet()
+        val added = fresh - tracked
+        if (added.isEmpty()) return
+        tracked.addAll(added)
+        seedTrackers(api, added.toList(), clearExisting = false)
+        prefs.edit()
+            .putString(KEY_DELEGATED_CARD_KEYS, tracked.joinToString(","))
+            .apply()
+        Log.d(TAG, "expanded snapshot +${added.size} keys (total ${tracked.size})")
+    }
+
+    private fun seedTrackers(
+        api: AnkiDroidApi,
+        keys: List<String>,
+        into: MutableMap<String, AnkiDroidApi.KeyTracker> = keyTrackers,
+        clearExisting: Boolean = true,
+    ) {
+        if (clearExisting) into.clear()
+        for (key in keys) {
+            if (into.containsKey(key)) continue
+            val (noteId, cardOrd) = api.parseCardKey(key) ?: continue
+            val card = api.queryCard(noteId, cardOrd) ?: continue
+            into[key] = AnkiDroidApi.KeyTracker(
+                lastReps = card.reps,
+                lastLapses = card.lapses,
+                lastDue = card.due,
+                lastType = card.type,
+            )
+        }
     }
 
     private fun checkBlockedAppGate(foreground: String?) {
@@ -355,6 +735,8 @@ class AppMonitorService : Service() {
         if (blockedCsv.isEmpty()) return
         val blocked = blockedCsv.split("|").filter { it.isNotEmpty() }.toSet()
         if (pkg !in blocked) return
+
+        if (isDailyGoalComplete(prefs)) return
 
         val now = System.currentTimeMillis()
         val unlockTime = prefs.getLong("unlock_$pkg", 0L)

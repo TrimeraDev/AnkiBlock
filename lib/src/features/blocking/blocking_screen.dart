@@ -6,6 +6,8 @@ import 'package:go_router/go_router.dart';
 import '../../core/database/database.dart';
 import '../../core/di/providers.dart';
 import '../../core/services/apps_service.dart';
+import '../../core/setup/setup_actions.dart';
+import '../../core/theme/app_theme.dart';
 
 class BlockingScreen extends ConsumerStatefulWidget {
   const BlockingScreen({super.key});
@@ -219,19 +221,7 @@ class _BlockingScreenState extends ConsumerState<BlockingScreen> {
   }
 
   Future<void> _syncNative() async {
-    final db = ref.read(databaseProvider);
-    final all = await db.watchAllBlockedApps().first;
-    final active = all
-        .where((b) => b.isBlocked)
-        .map((b) => (pkg: b.packageName, name: b.displayName))
-        .toList();
-    final svc = ref.read(appsServiceProvider);
-    await svc.setBlockedPackages(active);
-    if (active.isNotEmpty) {
-      await svc.startAppMonitor();
-    } else {
-      await svc.stopAppMonitor();
-    }
+    await syncBlockedPackagesToNative(ref);
   }
 }
 
@@ -411,8 +401,9 @@ class _SuggestedBanner extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(12, 8, 12, 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.primaryContainer,
-        borderRadius: BorderRadius.circular(12),
+        color: AppTheme.primary.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(AppTheme.cardRadius),
+        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.25)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -484,7 +475,7 @@ class _AppTile extends StatelessWidget {
           ),
           if (isSuggested) ...[
             const SizedBox(width: 6),
-            const Icon(Icons.auto_awesome, size: 14, color: Colors.amber),
+            const Icon(Icons.auto_awesome, size: 14, color: AppTheme.accent),
           ],
         ],
       ),

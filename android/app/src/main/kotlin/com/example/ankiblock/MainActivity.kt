@@ -133,6 +133,28 @@ class MainActivity : FlutterActivity() {
                     }
                     result.success(true)
                 }
+                "syncDailyGoalState" -> {
+                    val studyDayKey = call.argument<String>("studyDayKey") ?: ""
+                    val dailyGoal = call.argument<Int>("dailyGoal") ?: 0
+                    val cardsReviewed = call.argument<Int>("cardsReviewed") ?: 0
+                    AppMonitorService.setDailyGoalState(
+                        this,
+                        studyDayKey,
+                        dailyGoal,
+                        cardsReviewed,
+                    )
+                    result.success(true)
+                }
+                "syncStudyScope" -> {
+                    @Suppress("UNCHECKED_CAST")
+                    val deckIds = (call.argument<List<*>>("deckIds") ?: emptyList<Any?>())
+                        .mapNotNull { (it as? Number)?.toLong() }
+                    AppMonitorService.setStudyScopeDeckIds(this, deckIds)
+                    result.success(true)
+                }
+                "getDailyGoalState" -> {
+                    result.success(AppMonitorService.getDailyGoalState(this))
+                }
                 "startDelegatedSession" -> {
                     val pkg = call.argument<String>("packageName") ?: ""
                     val appName = call.argument<String>("appName") ?: pkg
