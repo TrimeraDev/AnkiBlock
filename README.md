@@ -71,4 +71,4 @@ Please do not commit signing keys, keystores, or other secrets.
 
 MIT — see [LICENSE](LICENSE).
 
-Copyright (c) 2025 Simon & Vincent UG (haftungsbeschränkt).
+Copyright (c) 2026 Simon & Vincent UG (haftungsbeschränkt).
