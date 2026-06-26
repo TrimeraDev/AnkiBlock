@@ -9,6 +9,7 @@ import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -330,10 +331,23 @@ class AppMonitorService : Service() {
         createChannels()
         clearStaleDelegatedSession()
         repairPassiveMergeState()
-        startForeground(NOTIFICATION_ID, buildIdleNotification())
+        promoteToForeground()
         pollStart = System.currentTimeMillis() - 60_000
         currentForegroundPackage = queryMostRecentForegroundPackage()
         handler.post(pollRunnable)
+    }
+
+    private fun promoteToForeground() {
+        val notification = buildIdleNotification()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
     }
 
     private fun clearStaleDelegatedSession() {
