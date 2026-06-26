@@ -1,9 +1,8 @@
-package com.example.ankiblock
+package com.anki.ankiblock
 
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.app.Service
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
@@ -28,7 +27,7 @@ import androidx.core.app.NotificationCompat
 class AppMonitorService : Service() {
 
     companion object {
-        const val CHANNEL_ID = "ankiblock_monitor"
+        const val CHANNEL_ID_SILENT = "ankiblock_monitor_silent"
         const val NOTIFICATION_ID = 4242
         const val PREFS = "ankiblock_block_prefs"
         const val KEY_BLOCKED = "blocked_packages_csv"
@@ -76,6 +75,7 @@ class AppMonitorService : Service() {
 
         const val KEY_UNLOCK_DURATION_MS = "unlock_duration_ms"
         const val KEY_BYPASS_SECONDS = "bypass_seconds"
+        const val KEY_IS_ENABLED = "blocking_enabled"
         const val DEFAULT_UNLOCK_DURATION_MS = 10 * 60 * 1000L
         const val DEFAULT_BYPASS_SECONDS = 60
 
@@ -101,13 +101,20 @@ class AppMonitorService : Service() {
             context: Context,
             unlockDurationMinutes: Int,
             bypassSeconds: Int,
+            isEnabled: Boolean = true,
         ) {
             val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             val unlockMs = (unlockDurationMinutes.coerceAtLeast(1) * 60 * 1000L)
             prefs.edit()
                 .putLong(KEY_UNLOCK_DURATION_MS, unlockMs)
                 .putInt(KEY_BYPASS_SECONDS, bypassSeconds.coerceAtLeast(1))
+                .putBoolean(KEY_IS_ENABLED, isEnabled)
                 .apply()
+        }
+
+        fun isBlockingEnabled(context: Context): Boolean {
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            return prefs.getBoolean(KEY_IS_ENABLED, true)
         }
 
         fun grantTempUnlock(
@@ -297,15 +304,6 @@ class AppMonitorService : Service() {
     private var lastReportedProgress = -1
     private var lastPassiveWatching = false
 
-    private data class DelegatedUnlockProgress(
-        val appName: String,
-        val packageName: String,
-        val completed: Int,
-        val target: Int,
-    ) {
-        val isUnlock: Boolean get() = packageName != PRACTICE_PACKAGE
-    }
-
     private val pollRunnable = object : Runnable {
         override fun run() {
             try {
@@ -329,10 +327,10 @@ class AppMonitorService : Service() {
         prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         overlayManager = CompletionOverlayManager(this)
         ankiApi = AnkiDroidApi(applicationContext)
-        createChannel()
+        createChannels()
         clearStaleDelegatedSession()
         repairPassiveMergeState()
-        startForeground(NOTIFICATION_ID, buildNotification())
+        startForeground(NOTIFICATION_ID, buildIdleNotification())
         pollStart = System.currentTimeMillis() - 60_000
         currentForegroundPackage = queryMostRecentForegroundPackage()
         handler.post(pollRunnable)
@@ -370,7 +368,6 @@ class AppMonitorService : Service() {
             prefs.edit().remove(KEY_DELEGATED_CARD_KEYS).apply()
             keyTrackers.clear()
             lastReportedProgress = -1
-            refreshDelegatedNotification()
             Log.i(TAG, "delegated session started — expecting AnkiDroid foreground")
         }
         return START_STICKY
@@ -383,83 +380,46 @@ class AppMonitorService : Service() {
         super.onDestroy()
     }
 
-    private fun createChannel() {
+    private fun createChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            val ch = NotificationChannel(
-                CHANNEL_ID,
-                "App blocking",
-                NotificationManager.IMPORTANCE_LOW,
+            nm.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_ID_SILENT,
+                    "Background monitoring",
+                    NotificationManager.IMPORTANCE_MIN,
+                ).apply {
+                    description =
+                        "Required by Android while app blocking runs in the background."
+                    setShowBadge(false)
+                },
             )
-            ch.description = "Monitors blocked apps to enforce study gate."
-            nm.createNotificationChannel(ch)
         }
     }
 
-    private fun buildNotification(
-        delegated: DelegatedUnlockProgress? = null,
-        dailyReviewed: Int? = null,
-        dailyGoal: Int? = null,
-        dailyCompleteMessage: String? = null,
-    ): Notification {
-        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_logo)
+    private fun buildIdleNotification(): Notification {
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID_SILENT)
+            .setSmallIcon(android.R.drawable.ic_lock_lock)
+            .setContentTitle("AnkiBlock")
+            .setContentText("Monitoring blocked apps")
             .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setOnlyAlertOnce(true)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setVisibility(NotificationCompat.VISIBILITY_SECRET)
+            .setShowWhen(false)
             .setSilent(true)
-
-        when {
-            delegated != null -> {
-                val title = if (delegated.isUnlock) {
-                    "Unlock ${delegated.appName}"
-                } else {
-                    "Study session"
-                }
-                builder
-                    .setContentTitle(title)
-                    .setContentText("${delegated.completed} / ${delegated.target} cards")
-                    .setProgress(delegated.target, delegated.completed, false)
-            }
-            dailyCompleteMessage != null -> {
-                builder
-                    .setContentTitle("AnkiBlock active")
-                    .setContentText(dailyCompleteMessage)
-            }
-            dailyReviewed != null && dailyGoal != null && dailyGoal > 0 -> {
-                builder
-                    .setContentTitle("AnkiBlock active")
-                    .setContentText("Daily goal: $dailyReviewed / $dailyGoal cards")
-                    .setProgress(
-                        dailyGoal,
-                        dailyReviewed.coerceAtMost(dailyGoal),
-                        false,
-                    )
-            }
-            else -> {
-                builder
-                    .setContentTitle("AnkiBlock active")
-                    .setContentText(
-                        when {
-                            hasDelegatedSession(prefs) ->
-                                "Watching your AnkiDroid study session"
-                            currentForegroundPackage == ANKIDROID_PACKAGE ->
-                                "Counting AnkiDroid study toward your daily goal"
-                            else -> "Watching for blocked apps"
-                        },
-                    )
-            }
+            .setOnlyAlertOnce(true)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            builder.setForegroundServiceBehavior(
+                NotificationCompat.FOREGROUND_SERVICE_DEFERRED,
+            )
         }
         return builder.build()
     }
 
-    private fun postForegroundNotification(notification: Notification) {
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.notify(NOTIFICATION_ID, notification)
-    }
-
     private fun resetForegroundNotification() {
-        postForegroundNotification(buildNotification())
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.notify(NOTIFICATION_ID, buildIdleNotification())
     }
 
     private fun onDelegatedSessionEnded() {
@@ -467,40 +427,9 @@ class AppMonitorService : Service() {
         resetForegroundNotification()
     }
 
-    private fun refreshDelegatedNotification() {
-        val pkg = prefs.getString(KEY_DELEGATED_PKG, null) ?: return
-        val appName = prefs.getString(KEY_DELEGATED_APP_NAME, pkg) ?: pkg
-        val target = prefs.getInt(KEY_DELEGATED_TARGET, 5)
-        postForegroundNotification(
-            buildNotification(
-                delegated = DelegatedUnlockProgress(
-                    appName = appName,
-                    packageName = pkg,
-                    completed = 0,
-                    target = target,
-                ),
-            ),
-        )
-    }
-
-    private fun reportProgressIfChanged(
-        completed: Int,
-        target: Int,
-        appName: String,
-        packageName: String,
-    ) {
+    private fun reportProgressIfChanged(completed: Int, target: Int) {
         if (completed == lastReportedProgress) return
         lastReportedProgress = completed
-        postForegroundNotification(
-            buildNotification(
-                delegated = DelegatedUnlockProgress(
-                    appName = appName,
-                    packageName = packageName,
-                    completed = completed,
-                    target = target,
-                ),
-            ),
-        )
         MainActivity.notifyFlutter(
             "onDelegatedProgress",
             mapOf("completed" to completed, "target" to target),
@@ -586,7 +515,6 @@ class AppMonitorService : Service() {
         if (!lastPassiveWatching) {
             lastPassiveWatching = true
             Log.i(TAG, "passive watching AnkiDroid decks=$deckIds")
-            resetForegroundNotification()
         }
 
         ensureMultiDeckSnapshot(
@@ -634,13 +562,6 @@ class AppMonitorService : Service() {
 
         Log.i(TAG, "passive study +$delta cards (daily=$newDaily passiveTotal=$passiveTotal)")
 
-        val goal = prefs.getInt(KEY_DAILY_GOAL, 0)
-        val notification = if (goal > 0 && newDaily >= goal) {
-            buildNotification(dailyCompleteMessage = "Studied $newDaily cards today")
-        } else {
-            buildNotification(dailyReviewed = newDaily, dailyGoal = goal)
-        }
-        postForegroundNotification(notification)
         MainActivity.notifyFlutter(
             "onPassiveStudyProgress",
             mapOf("delta" to delta, "cardsReviewed" to newDaily),
@@ -842,7 +763,7 @@ class AppMonitorService : Service() {
         }
         prefs.edit().putInt(KEY_DELEGATED_COMPLETE_STREAK, streak).apply()
 
-        reportProgressIfChanged(completed, target, appName, pkg)
+        reportProgressIfChanged(completed, target)
 
         Log.d(
             TAG,
@@ -902,6 +823,8 @@ class AppMonitorService : Service() {
         if (pkg == lastForegroundPackage) return
         lastForegroundPackage = pkg
 
+        if (!AppMonitorService.isBlockingEnabled(this)) return
+
         val blockedCsv = prefs.getString(KEY_BLOCKED, "") ?: ""
         if (blockedCsv.isEmpty()) return
         val blocked = blockedCsv.split("|").filter { it.isNotEmpty() }.toSet()
@@ -922,6 +845,8 @@ class AppMonitorService : Service() {
     private fun checkExpiredUnlockWhileForeground(foreground: String?) {
         val pkg = foreground ?: return
         if (pkg == packageName) return
+
+        if (!AppMonitorService.isBlockingEnabled(this)) return
 
         val blockedCsv = prefs.getString(KEY_BLOCKED, "") ?: ""
         if (blockedCsv.isEmpty()) return
@@ -963,23 +888,8 @@ class AppMonitorService : Service() {
         }
         try {
             startActivity(intent)
-        } catch (_: Throwable) {
-            val pi = PendingIntent.getActivity(
-                this,
-                pkg.hashCode(),
-                intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
-            val n = NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("$displayName is blocked")
-                .setContentText("Tap to study and unlock")
-                .setSmallIcon(android.R.drawable.ic_lock_lock)
-                .setFullScreenIntent(pi, true)
-                .setContentIntent(pi)
-                .setAutoCancel(true)
-                .build()
-            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
-                .notify(pkg.hashCode(), n)
+        } catch (e: Throwable) {
+            Log.w(TAG, "gate launch failed for $displayName", e)
         }
     }
 }

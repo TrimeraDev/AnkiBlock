@@ -20,7 +20,7 @@ class OnboardingScreen extends ConsumerStatefulWidget {
 
 class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
     with WidgetsBindingObserver {
-  static const _pageCount = 8;
+  static const _pageCount = 7;
 
   final _controller = PageController();
   int _page = 0;
@@ -29,7 +29,6 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
   bool _ankiPermission = false;
   bool _hasUsage = false;
   bool _hasOverlay = false;
-  bool _hasNotification = false;
 
   @override
   void initState() {
@@ -60,13 +59,11 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
     final hadUsage = _hasUsage;
     final usage = await perm.hasUsageAccessPermission();
     final overlay = await perm.hasOverlayPermission();
-    final notif = await perm.hasNotificationPermission();
     final ankiStatus = await anki.getStatus();
     if (!mounted) return;
     setState(() {
       _hasUsage = usage;
       _hasOverlay = overlay;
-      _hasNotification = notif;
       _ankiInstalled = ankiStatus.installed;
       _ankiPermission = ankiStatus.permissionGranted;
     });
@@ -208,19 +205,6 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
                         ),
                       ],
                     ),
-                  ),
-                  _PermissionPage(
-                    icon: Icons.notifications_outlined,
-                    title: 'Notifications (optional)',
-                    body:
-                        'Get reminders when reviews are due and when an unlock '
-                        'is about to expire.',
-                    granted: _hasNotification,
-                    actionLabel: 'Allow notifications',
-                    onAction: () async {
-                      await perm.requestNotificationPermission();
-                      await _refresh();
-                    },
                   ),
                 ],
               ),

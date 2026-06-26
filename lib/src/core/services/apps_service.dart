@@ -227,11 +227,13 @@ class AppsService {
   Future<void> syncBlockRuleSettings({
     required int unlockDurationMinutes,
     required int bypassSeconds,
+    required bool isEnabled,
   }) async {
     if (!Platform.isAndroid) return;
     await _channel.invokeMethod('syncBlockRuleSettings', {
       'unlockDurationMinutes': unlockDurationMinutes,
       'bypassSeconds': bypassSeconds,
+      'isEnabled': isEnabled,
     });
   }
 

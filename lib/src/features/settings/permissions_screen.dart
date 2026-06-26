@@ -16,7 +16,6 @@ class _PermissionsScreenState extends ConsumerState<PermissionsScreen>
     with WidgetsBindingObserver {
   bool _usage = false;
   bool _overlay = false;
-  bool _notifications = false;
   bool _loading = true;
 
   @override
@@ -44,12 +43,10 @@ class _PermissionsScreenState extends ConsumerState<PermissionsScreen>
     final svc = ref.read(permissionServiceProvider);
     final usage = await svc.hasUsageAccessPermission();
     final overlay = await svc.hasOverlayPermission();
-    final notif = await svc.hasNotificationPermission();
     if (!mounted) return;
     setState(() {
       _usage = usage;
       _overlay = overlay;
-      _notifications = notif;
       _loading = false;
     });
   }
@@ -86,16 +83,6 @@ class _PermissionsScreenState extends ConsumerState<PermissionsScreen>
                   granted: _overlay,
                   onRequest: () async {
                     await svc.openOverlaySettings();
-                  },
-                ),
-                _PermissionTile(
-                  icon: Icons.notifications_outlined,
-                  title: 'Notifications',
-                  subtitle: 'Optional. Reminders and unlock status.',
-                  granted: _notifications,
-                  onRequest: () async {
-                    await svc.requestNotificationPermission();
-                    await _refresh();
                   },
                 ),
               ],

@@ -730,33 +730,40 @@ class _AnkiDroidStatusCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final status = ankiStatusAsync.valueOrNull;
-    if (status?.isReady ?? false) return const SizedBox.shrink();
+    return ankiStatusAsync.when(
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (status) {
+        if (status.isReady) return const SizedBox.shrink();
 
-    final notInstalled = status != null && !status.installed;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: BrandCard(
-        color: AppTheme.warning.withValues(alpha: 0.08),
-        onTap: () => context.push('/ankidroid'),
-        child: Row(
-          children: [
-            const Icon(Icons.info_outline, color: AppTheme.warning, size: 22),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                notInstalled
-                    ? 'Requires AnkiDroid — install to start studying.'
-                    : 'Grant AnkiDroid access to track your cards.',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppTheme.onSurface,
-                    ),
-              ),
+        final notInstalled = !status.installed;
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 16),
+          child: BrandCard(
+            color: AppTheme.warning.withValues(alpha: 0.08),
+            onTap: () => context.push('/ankidroid'),
+            child: Row(
+              children: [
+                const Icon(Icons.info_outline,
+                    color: AppTheme.warning, size: 22),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    notInstalled
+                        ? 'Requires AnkiDroid — install to start studying.'
+                        : 'Grant AnkiDroid access to track your cards.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppTheme.onSurface,
+                        ),
+                  ),
+                ),
+                const Icon(Icons.chevron_right,
+                    color: AppTheme.onSurfaceVariant),
+              ],
             ),
-            const Icon(Icons.chevron_right, color: AppTheme.onSurfaceVariant),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }

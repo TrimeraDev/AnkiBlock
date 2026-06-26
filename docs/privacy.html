@@ -6,7 +6,7 @@
     <title>Privacy Policy — AnkiBlock</title>
     <meta
       name="description"
-      content="Privacy policy for the AnkiBlock Android app (com.anki.ankidroid)."
+      content="Privacy policy for the AnkiBlock Android app (com.anki.ankiblock)."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -35,8 +35,8 @@
     <main class="page legal-page">
       <h1>Privacy Policy</h1>
       <p class="meta">
-        App: AnkiBlock (<code>com.anki.ankidroid</code>) &middot; Last updated:
-        June 25, 2026
+        App: AnkiBlock (<code>com.anki.ankiblock</code>) &middot; Last updated:
+        June 26, 2026
       </p>
 
       <p>
@@ -58,6 +58,10 @@
         <li>
           AnkiBlock does <strong>not</strong> include third-party analytics,
           advertising, in-app purchases, or crash-reporting SDKs.
+        </li>
+        <li>
+          The app may download the Inter UI font from Google Fonts on first use;
+          no personal data is sent with that request.
         </li>
         <li>
           Data needed for app blocking and study tracking is processed and stored
@@ -143,16 +147,18 @@
       <p>AnkiBlock requests the following Android permissions:</p>
       <ul>
         <li>
+          <strong>Internet:</strong> to download the Inter UI font from Google
+          Fonts (via the open-source Google Fonts package). No personal data is
+          included in these requests. After the font is cached on your device,
+          the app works offline.
+        </li>
+        <li>
           <strong>Usage access:</strong> to detect when a blocked app is opened
           and to show approximate app usage time in the picker.
         </li>
         <li>
-          <strong>Display over other apps:</strong> to show the study gate and
-          completion overlay when a blocked app is launched.
-        </li>
-        <li>
-          <strong>Notifications:</strong> to show foreground service and
-          completion notifications while the app monitor is active.
+          <strong>Display over other apps:</strong> to show the study completion
+          overlay after you finish a study session.
         </li>
         <li>
           <strong>Query installed apps:</strong> to list apps you can block.
@@ -164,7 +170,7 @@
         </li>
         <li>
           <strong>Foreground service:</strong> to monitor the foreground app
-          while enforcing the study gate.
+          while enforcing the study gate (shown as a silent, ongoing notification).
         </li>
       </ul>
       <p>
@@ -275,6 +281,26 @@
         AnkiBlock integrates with AnkiDroid (<code>com.ichi2.anki</code>), an
         independent app. Please review AnkiDroid’s privacy policy for how that
         app handles your study data.
+      </p>
+      <p>
+        The app uses the
+        <a
+          href="https://fonts.google.com/specimen/Inter"
+          rel="noopener noreferrer"
+          target="_blank"
+          >Inter</a
+        >
+        typeface via Google Fonts. When you first open AnkiBlock (or after the
+        font cache is cleared), your device may request font files from Google’s
+        servers. That request does not include your study data, blocked-app
+        choices, or other personal information. See
+        <a
+          href="https://developers.google.com/fonts/faq"
+          rel="noopener noreferrer"
+          target="_blank"
+          >Google Fonts FAQ</a
+        >
+        for details on how Google handles font requests.
       </p>
     </main>
 

@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:flutter/services.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 class PermissionService {
   static const _channel = MethodChannel('com.ankiblock/permissions');
@@ -40,26 +39,9 @@ class PermissionService {
     } catch (_) {}
   }
 
-  Future<bool> hasNotificationPermission() async {
-    if (Platform.isAndroid) {
-      final status = await Permission.notification.status;
-      return status.isGranted;
-    }
-    return true;
-  }
-
-  Future<bool> requestNotificationPermission() async {
-    if (Platform.isAndroid) {
-      final status = await Permission.notification.request();
-      return status.isGranted;
-    }
-    return true;
-  }
-
+  /// Usage access: required for detecting blocked apps in the foreground.
   Future<bool> hasRequiredPermissions() async {
-    final hasUsage = await hasUsageAccessPermission();
-    final hasNotification = await hasNotificationPermission();
-    return hasUsage && hasNotification;
+    return hasUsageAccessPermission();
   }
 
   /// Usage access + overlay: both required for the app block / study gate flow.

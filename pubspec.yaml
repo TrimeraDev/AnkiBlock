@@ -28,9 +28,6 @@ dependencies:
   path: ^1.9.0
   shared_preferences: ^2.3.2
 
-  # Platform
-  permission_handler: ^11.3.1
-
   # Utils
   intl: ^0.19.0
   url_launcher: ^6.3.2

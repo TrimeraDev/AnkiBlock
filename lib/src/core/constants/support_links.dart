@@ -7,7 +7,7 @@ abstract final class SupportLinks {
   static const contactEmail = 'ankiblock@trimera.dev';
 
   /// Play Store listing package id (used for review links).
-  static const playStorePackageId = 'com.anki.ankidroid';
+  static const playStorePackageId = 'com.anki.ankiblock';
 
   static Uri get playStoreListing => Uri.parse(
         'https://play.google.com/store/apps/details?id=$playStorePackageId',

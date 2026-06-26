@@ -1,4 +1,4 @@
-package com.example.ankiblock
+package com.anki.ankiblock
 
 import android.app.Activity
 import android.content.Context

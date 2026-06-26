@@ -32,6 +32,7 @@ Future<void> syncBlockRuleToNative(WidgetRef ref) async {
   await ref.read(appsServiceProvider).syncBlockRuleSettings(
         unlockDurationMinutes: rule?.unlockDurationMinutes ?? 10,
         bypassSeconds: rule?.bypassSeconds ?? 60,
+        isEnabled: rule?.isEnabled ?? true,
       );
 }
 
@@ -79,12 +80,10 @@ Future<void> mergeDailyFromNative(WidgetRef ref) async {
 }
 
 Future<void> ensureAppMonitorRunning(WidgetRef ref) async {
-  final rule = await ref.read(blockRuleProvider.future);
   final blocked =
       await ref.read(databaseProvider).watchActiveBlockedApps().first;
-  final dailyGoal = rule?.dailyCardsGoal ?? 0;
   final svc = ref.read(appsServiceProvider);
-  if (blocked.isNotEmpty || dailyGoal > 0) {
+  if (blocked.isNotEmpty) {
     await svc.startAppMonitor();
   } else {
     await svc.stopAppMonitor();

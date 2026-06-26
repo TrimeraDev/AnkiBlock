@@ -25,7 +25,7 @@ AnkiBlock is a non-commercial open-source project published by Simon & Vincent U
 - **[Flutter](https://docs.flutter.dev/get-started/install)** 3.22+ and Dart 3.4+
 - Android SDK with JDK 17 (for native Android builds)
 
-AnkiBlock also needs Android permissions for usage access, overlay display, notifications, and AnkiDroid database access. The app guides you through granting these during onboarding.
+AnkiBlock also needs Android permissions for usage access, overlay display, and AnkiDroid database access. The app guides you through granting these during onboarding.
 
 ## Getting started
 

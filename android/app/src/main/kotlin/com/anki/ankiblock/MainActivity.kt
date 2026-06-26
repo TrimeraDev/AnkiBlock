@@ -1,4 +1,4 @@
-package com.example.ankiblock
+package com.anki.ankiblock
 
 import android.app.AppOpsManager
 import android.app.usage.UsageEvents
@@ -152,10 +152,12 @@ class MainActivity : FlutterActivity() {
                     val unlockDurationMinutes =
                         call.argument<Int>("unlockDurationMinutes") ?: 10
                     val bypassSeconds = call.argument<Int>("bypassSeconds") ?: 60
+                    val isEnabled = call.argument<Boolean>("isEnabled") ?: true
                     AppMonitorService.setBlockRuleSettings(
                         this,
                         unlockDurationMinutes,
                         bypassSeconds,
+                        isEnabled,
                     )
                     result.success(true)
                 }

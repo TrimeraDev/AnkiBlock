@@ -47,7 +47,7 @@ class SettingsScreen extends ConsumerWidget {
         ListTile(
           leading: const Icon(Icons.lock_outline),
           title: const Text('Permissions'),
-          subtitle: const Text('Usage Access, Overlay, Notifications'),
+          subtitle: const Text('Usage Access and Overlay'),
           trailing: const Icon(Icons.chevron_right),
           onTap: () => context.push('/permissions'),
         ),
@@ -311,7 +311,9 @@ class SettingsScreen extends ConsumerWidget {
       updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
     ));
     ref.invalidate(blockRuleProvider);
-    if (unlockDurationMinutes != null || bypassSeconds != null) {
+    if (unlockDurationMinutes != null ||
+        bypassSeconds != null ||
+        isEnabled != null) {
       await syncBlockRuleToNative(ref);
     }
   }
