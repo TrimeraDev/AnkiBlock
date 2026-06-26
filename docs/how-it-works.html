@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How it works — AnkiBlock</title>
+    <meta
+      name="description"
+      content="How AnkiBlock uses AnkiDroid's on-device ContentProvider API to read study progress and enforce app blocking — without copying your flashcards."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/style.css" />
+    <link rel="icon" href="assets/logo.png" type="image/png" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="site-header-inner">
+        <a class="brand" href="index.html">
+          <img src="assets/logo.png" alt="" width="36" height="36" />
+          AnkiBlock
+        </a>
+        <nav class="site-nav" aria-label="Site">
+          <a href="index.html">Home</a>
+          <a href="how-it-works.html" aria-current="page">How it works</a>
+          <a href="privacy.html">Privacy</a>
+          <a href="imprint.html">Imprint</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="page legal-page">
+      <h1>How it works</h1>
+      <p class="meta">
+        AnkiBlock &middot; On-device AnkiDroid integration
+      </p>
+
+      <p>
+        AnkiBlock is a study gate for Android: it blocks apps you choose until you
+        complete enough Anki cards. Your flashcards, notes, media, and review
+        history stay in <strong>AnkiDroid</strong>. AnkiBlock never hosts your
+        collection and does not replace AnkiDroid’s reviewer — it reads your
+        real study progress through AnkiDroid’s documented
+        <strong>on-device API</strong> and unlocks apps when you have earned it.
+      </p>
+
+      <h2>At a glance</h2>
+      <ol>
+        <li>You install AnkiDroid and grant AnkiBlock database access.</li>
+        <li>You pick which apps to block and how many cards unlock each one.</li>
+        <li>When a blocked app opens, AnkiBlock sends you to study in AnkiDroid.</li>
+        <li>AnkiBlock polls AnkiDroid locally to count valid reviews.</li>
+        <li>When you hit your goal, you get a timed unlock for that app.</li>
+      </ol>
+
+      <h2>AnkiDroid stays your flashcard app</h2>
+      <p>
+        AnkiBlock is not an Anki client. It does not store decks, show card
+        fronts and backs, or run the scheduling algorithm. All of that happens in
+        AnkiDroid’s native reviewer — including images, audio, and LaTeX. If you
+        sync with AnkiWeb, that sync is handled entirely by AnkiDroid, not by
+        AnkiBlock.
+      </p>
+      <p>
+        AnkiBlock only needs enough information to know which decks you care
+        about, how many cards are due, and whether you have actually studied
+        cards toward your unlock goal.
+      </p>
+
+      <h2>The on-device API</h2>
+      <p>
+        AnkiDroid exposes a public
+        <a
+          href="https://developer.android.com/guide/topics/providers/content-provider-basics"
+          rel="noopener noreferrer"
+          target="_blank"
+          >Android ContentProvider</a
+        >
+        backed by
+        <code>com.ichi2.anki.flashcards</code>. Third-party apps talk to it with
+        the standard <code>ContentResolver</code> API — the same mechanism
+        Android uses for contacts or calendar data. Everything happens on your
+        phone; nothing is sent to AnkiBlock servers (there are none).
+      </p>
+      <p>
+        The contract is defined in AnkiDroid’s
+        <a
+          href="https://github.com/ankidroid/Anki-Android/wiki/AnkiDroid-API"
+          rel="noopener noreferrer"
+          target="_blank"
+          >AnkiDroid API</a
+        >
+        documentation and
+        <a
+          href="https://github.com/ankidroid/Anki-Android/blob/main/api/src/main/java/com/ichi2/anki/FlashCardsContract.kt"
+          rel="noopener noreferrer"
+          target="_blank"
+          ><code>FlashCardsContract</code></a
+        >. AnkiBlock mirrors those URIs and column names directly instead of
+        bundling AnkiDroid’s API library, so the app stays lightweight.
+      </p>
+
+      <h3>Permission</h3>
+      <p>
+        Before AnkiBlock can read your collection, you must grant the
+        <code>com.ichi2.anki.permission.READ_WRITE_DATABASE</code> permission.
+        AnkiDroid shows this as a runtime permission dialog. You can revoke it
+        anytime in Android settings or inside AnkiDroid. Without it, AnkiBlock
+        can detect that AnkiDroid is installed but cannot list decks or track
+        study progress.
+      </p>
+
+      <h3>What AnkiBlock reads</h3>
+      <p>Through the ContentProvider, AnkiBlock queries:</p>
+      <ul>
+        <li>
+          <strong>Decks</strong> (<code>content://com.ichi2.anki.flashcards/decks</code>)
+          — deck names and live due counts (learning, review, and new), matching
+          what AnkiDroid shows on its home screen.
+        </li>
+        <li>
+          <strong>Schedule snapshots</strong>
+          (<code>…/schedule</code>) — which cards are currently queued for study
+          in a deck, identified by note id and card ordinal. This seeds progress
+          tracking when a session starts.
+        </li>
+        <li>
+          <strong>Card statistics</strong> (<code>…/cards</code>) — per-card
+          <code>reps</code>, <code>lapses</code>, <code>type</code>,
+          <code>due</code>, and related scheduling fields. AnkiBlock uses these
+          to detect when you have answered a card, not to display card content.
+        </li>
+      </ul>
+      <p>
+        AnkiBlock does <strong>not</strong> copy note fields, card questions or
+        answers, or media files off the device. It does not submit reviews on
+        your behalf — you press the buttons in AnkiDroid, and AnkiDroid updates
+        its database; AnkiBlock observes the change.
+      </p>
+
+      <h2>Opening the reviewer</h2>
+      <p>
+        When you tap “Study in AnkiDroid”, AnkiBlock launches AnkiDroid’s
+        built-in <code>Reviewer</code> activity with the chosen
+        <code>deckId</code> extra — the same screen you would see if you opened
+        that deck inside AnkiDroid. You study with AnkiDroid’s full UI: TTS,
+        gestures, bury/suspend, and whatever add-ons AnkiDroid supports for
+        review.
+      </p>
+      <p>
+        Before opening the reviewer, AnkiBlock records a snapshot of the cards
+        currently on that deck’s schedule. That snapshot defines which cards
+        count toward the unlock for this session.
+      </p>
+
+      <h2>How progress is counted</h2>
+      <p>
+        A background service polls AnkiDroid every few hundred milliseconds while
+        you are in a study session (or while AnkiDroid is in the foreground
+        during passive tracking — see below). On each poll it re-reads the
+        <code>reps</code> and <code>lapses</code> counters for the tracked
+        cards.
+      </p>
+      <p>A card counts toward your goal when:</p>
+      <ul>
+        <li>Its <code>reps</code> counter increased since the last poll, and</li>
+        <li>
+          The answer was effectively <strong>Hard</strong>, <strong>Good</strong>,
+          or <strong>Easy</strong> — not <strong>Again</strong>.
+        </li>
+      </ul>
+      <p>
+        “Again” on a review card increments <code>lapses</code>, which AnkiBlock
+        treats as not credited. On learning or relearning cards, “Again” often
+        reschedules the card within a few minutes without bumping lapses; those
+        short-cycle Agains are ignored too, so only real forward progress
+        unlocks your apps.
+      </p>
+      <p>
+        When credited reviews reach your target, AnkiBlock shows a completion
+        overlay (even on top of AnkiDroid) and grants a timed unlock for the
+        blocked app you were trying to open.
+      </p>
+
+      <h2>Passive study</h2>
+      <p>
+        If you open AnkiDroid on your own — without going through the study
+        gate — AnkiBlock can still count that work toward your
+        <strong>daily study goal</strong>, as long as you have granted database
+        access and configured which decks are in scope. The same reps/lapses
+        logic applies; there is no app unlock attached, only daily progress.
+      </p>
+
+      <h2>Deck scope</h2>
+      <p>
+        You choose which AnkiDroid decks AnkiBlock cares about:
+      </p>
+      <ul>
+        <li>
+          <strong>All decks</strong> — every deck’s due cards contribute (like
+          AnkiDroid’s “study all decks”).
+        </li>
+        <li>
+          <strong>Selected decks</strong> (default) — toggle individual decks on
+          or off; counts are aggregated across enabled decks.
+        </li>
+        <li>
+          <strong>Single deck</strong> — one active deck at a time, picked from
+          your AnkiDroid deck list.
+        </li>
+      </ul>
+      <p>
+        Scope preferences are stored locally on your device. Deck listings and due
+        counts always come fresh from AnkiDroid’s provider, so they stay in sync
+        with whatever you changed in AnkiDroid itself.
+      </p>
+
+      <h2>App blocking (separate from AnkiDroid)</h2>
+      <p>
+        Blocking uses Android’s
+        <code>UsageStatsManager</code> to notice when a blocked app comes to the
+        foreground, then routes you to AnkiBlock’s study gate. That layer is
+        independent of the AnkiDroid API — it only decides <em>when</em> to ask
+        you to study. The AnkiDroid integration decides <em>whether</em> you have
+        studied enough.
+      </p>
+
+      <h2>Privacy summary</h2>
+      <ul>
+        <li>All AnkiDroid reads happen on-device via ContentProvider queries.</li>
+        <li>Your collection is not uploaded to AnkiBlock.</li>
+        <li>AnkiBlock does not require an account.</li>
+        <li>
+          Revoking AnkiDroid database access immediately stops AnkiBlock from
+          reading decks or tracking reviews.
+        </li>
+      </ul>
+      <p>
+        For full details, see the
+        <a href="privacy.html">privacy policy</a>.
+      </p>
+
+      <h2>Not affiliated</h2>
+      <p>
+        AnkiBlock is an independent project. It is not made by, endorsed by, or
+        affiliated with Anki or AnkiDroid. AnkiDroid
+        (<code>com.ichi2.anki</code>) must be installed separately from Google
+        Play or F-Droid.
+      </p>
+    </main>
+
+    <footer class="site-footer">
+      <p>
+        &copy; Vincent Schulz. AnkiBlock is not affiliated with Anki or AnkiDroid.
+        Published on Google Play by Simon &amp; Vincent UG (haftungsbeschränkt)
+        for store compliance only.
+      </p>
+      <p>
+        <a href="how-it-works.html">How it works</a>
+        &middot;
+        <a href="privacy.html">Privacy policy</a>
+        &middot;
+        <a href="imprint.html">Imprint</a>
+      </p>
+    </footer>
+  </body>
+</html>

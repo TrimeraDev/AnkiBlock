@@ -240,16 +240,16 @@ class _DailyGoalPanelState extends ConsumerState<DailyGoalPanel> {
   }
 }
 
-/// Toggle which installed apps are blocked. Shows suggested apps first.
+/// Toggle which installed apps are blocked, sorted by screen time.
 class AppBlockSetupPanel extends ConsumerWidget {
-  final bool suggestedOnly;
   final bool showUsage;
+  final bool shrinkWrap;
   final EdgeInsetsGeometry? padding;
 
   const AppBlockSetupPanel({
     super.key,
-    this.suggestedOnly = false,
     this.showUsage = true,
+    this.shrinkWrap = true,
     this.padding,
   });
 
@@ -280,39 +280,19 @@ class AppBlockSetupPanel extends ConsumerWidget {
             .map((b) => b.packageName)
             .toSet();
 
-        final suggested = apps
-            .where((a) => kSuggestedBlockPackages.contains(a.packageName))
-            .toList();
-        if (showUsage) {
-          suggested.sort((a, b) {
+        int compareApps(InstalledApp a, InstalledApp b) {
+          if (showUsage) {
             final cmp = b.usage.compareTo(a.usage);
             if (cmp != 0) return cmp;
-            return a.appName.compareTo(b.appName);
-          });
-        } else {
-          suggested.sort((a, b) => a.appName.compareTo(b.appName));
-        }
-
-        final others = suggestedOnly
-            ? <InstalledApp>[]
-            : (apps
-                  .where((a) =>
-                      !kSuggestedBlockPackages.contains(a.packageName) &&
-                      !a.isSystem)
-                  .toList());
-        if (!suggestedOnly) {
-          if (showUsage) {
-            others.sort((a, b) {
-              final cmp = b.usage.compareTo(a.usage);
-              if (cmp != 0) return cmp;
-              return a.appName.compareTo(b.appName);
-            });
-          } else {
-            others.sort((a, b) => a.appName.compareTo(b.appName));
           }
+          return a.appName.compareTo(b.appName);
         }
 
-        final list = [...suggested, ...others];
+        final list = apps.where((a) => !a.isSystem).toList()..sort(compareApps);
+
+        final suggested = list
+            .where((a) => kSuggestedSocialPackages.contains(a.packageName))
+            .toList();
         if (list.isEmpty) {
           return Padding(
             padding: padding ?? EdgeInsets.zero,
@@ -325,6 +305,33 @@ class AppBlockSetupPanel extends ConsumerWidget {
 
         final blockedCount =
             list.where((a) => blockedSet.contains(a.packageName)).length;
+
+        final listView = ListView.separated(
+          shrinkWrap: shrinkWrap,
+          physics: shrinkWrap
+              ? const NeverScrollableScrollPhysics()
+              : const AlwaysScrollableScrollPhysics(),
+          padding: padding ?? EdgeInsets.zero,
+          itemCount: list.length,
+          separatorBuilder: (_, __) => const Divider(height: 1),
+          itemBuilder: (context, i) {
+            final app = list[i];
+            final isBlocked = blockedSet.contains(app.packageName);
+            final isSuggested =
+                kSuggestedSocialPackages.contains(app.packageName);
+            return _AppToggleRow(
+              app: app,
+              isBlocked: isBlocked,
+              isSuggested: isSuggested,
+              showUsage: showUsage,
+              onChanged: (v) => toggleAppBlocked(
+                ref,
+                app: app,
+                blocked: v,
+              ),
+            );
+          },
+        );
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -340,30 +347,7 @@ class AppBlockSetupPanel extends ConsumerWidget {
               ),
               const SizedBox(height: 4),
             ],
-            ListView.separated(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              padding: padding ?? EdgeInsets.zero,
-              itemCount: list.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
-              itemBuilder: (context, i) {
-                final app = list[i];
-                final isBlocked = blockedSet.contains(app.packageName);
-                final isSuggested =
-                    kSuggestedBlockPackages.contains(app.packageName);
-                return _AppToggleRow(
-                  app: app,
-                  isBlocked: isBlocked,
-                  isSuggested: isSuggested,
-                  showUsage: showUsage,
-                  onChanged: (v) => toggleAppBlocked(
-                    ref,
-                    app: app,
-                    blocked: v,
-                  ),
-                );
-              },
-            ),
+            if (shrinkWrap) listView else Expanded(child: listView),
           ],
         );
       },
@@ -396,7 +380,12 @@ class _AppToggleRow extends StatelessWidget {
         child: app.icon != null
             ? ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                child: Image.memory(app.icon!, gaplessPlayback: true),
+                child: Image.memory(
+                  app.icon!,
+                  gaplessPlayback: true,
+                  cacheWidth: 96,
+                  cacheHeight: 96,
+                ),
               )
             : const Icon(Icons.android, color: AppTheme.onSurfaceVariant),
       ),

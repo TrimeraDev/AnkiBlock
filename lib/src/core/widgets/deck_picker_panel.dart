@@ -70,116 +70,191 @@ class _DeckPickerPanelState extends ConsumerState<DeckPickerPanel> {
     final decksAsync = ref.watch(ankiDroidDecksProvider);
     final scopeAsync = ref.watch(studyScopeProvider);
 
-    return statusAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => Text('Error: $e'),
-      data: (status) {
-        if (!status.isReady) {
-          return Text(
-            'Connect AnkiDroid first to choose which decks count toward '
-            'your unlock goal.',
-            style: Theme.of(context).textTheme.bodySmall,
-          );
-        }
-        return decksAsync.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => Text('Error: $e'),
-          data: (decks) {
-            if (decks.isEmpty) {
-              return Text(
-                'No decks found in AnkiDroid.',
-                style: Theme.of(context).textTheme.bodySmall,
-              );
-            }
-            return scopeAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Text('Error: $e'),
-              data: (scope) {
-                final filtered = _filterAndSort(decks);
-                final enabledCount = countEnabledDecks(scope, decks);
-                final dueTotal = countDueInScope(scope, decks);
+    if (!statusAsync.hasValue && statusAsync.isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (statusAsync.hasError && !statusAsync.hasValue) {
+      return Text('Error: ${statusAsync.error}');
+    }
 
-                final children = <Widget>[
-                  if (widget.showScopeModes) ...[
-                    _ScopeModeHeader(scope: scope, onChanged: _invalidateScope),
-                    const Divider(height: 1),
-                  ],
-                  if (widget.showSearch) ...[
-                    _DeckSearchBar(
-                      query: _query,
-                      onlyWithDue: _onlyWithDue,
-                      sort: _sort,
-                      onQueryChanged: (v) => setState(() => _query = v),
-                      onOnlyWithDueChanged: (v) =>
-                          setState(() => _onlyWithDue = v),
-                      onSortChanged: (v) => setState(() => _sort = v),
-                    ),
-                  ],
-                  if (widget.showBulkActions && scope.mode != StudyScopeMode.single)
-                    _BulkActionsHeader(
-                      enabledCount: enabledCount,
-                      totalCount: decks.length,
-                      dueTotal: dueTotal,
-                      decks: decks,
-                      onChanged: _invalidateScope,
-                    ),
-                  if (filtered.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 24),
-                      child: Text(
-                        'No decks match your search.',
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    )
-                  else if (scope.mode == StudyScopeMode.single)
-                    RadioGroup<int>(
-                      groupValue: scope.activeDeckId,
-                      onChanged: (v) async {
-                        await ref
-                            .read(studyScopeServiceProvider)
-                            .setActiveDeck(v);
-                        await _invalidateScope();
-                      },
-                      child: Column(
-                        children: [
-                          for (final deck in filtered)
-                            _DeckPickerRow(
-                              deck: deck,
-                              scope: scope,
-                              onChanged: _invalidateScope,
-                            ),
-                        ],
-                      ),
-                    )
-                  else
-                    ...filtered.map(
-                      (deck) => _DeckPickerRow(
-                        deck: deck,
-                        scope: scope,
-                        onChanged: _invalidateScope,
-                      ),
-                    ),
-                ];
+    final status = statusAsync.value;
+    if (status == null || !status.isReady) {
+      return Text(
+        'Connect AnkiDroid first to choose which decks count toward '
+        'your unlock goal.',
+        style: Theme.of(context).textTheme.bodySmall,
+      );
+    }
 
-                if (widget.shrinkWrap) {
-                  return ListView(
-                    shrinkWrap: true,
-                    physics: widget.physics ?? const NeverScrollableScrollPhysics(),
-                    padding: widget.padding ?? EdgeInsets.zero,
-                    children: children,
-                  );
-                }
-                return ListView(
-                  physics: widget.physics,
-                  padding: widget.padding ?? EdgeInsets.zero,
-                  children: children,
-                );
-              },
-            );
-          },
-        );
+    if (!decksAsync.hasValue && decksAsync.isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (decksAsync.hasError && !decksAsync.hasValue) {
+      return Text('Error: ${decksAsync.error}');
+    }
+
+    final decks = decksAsync.value ?? const <AnkiDroidDeck>[];
+    if (decks.isEmpty) {
+      return Text(
+        'No decks found in AnkiDroid.',
+        style: Theme.of(context).textTheme.bodySmall,
+      );
+    }
+
+    if (!scopeAsync.hasValue && scopeAsync.isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (scopeAsync.hasError && !scopeAsync.hasValue) {
+      return Text('Error: ${scopeAsync.error}');
+    }
+
+    final scope = scopeAsync.value;
+    if (scope == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return _DeckPickerBody(
+      scope: scope,
+      decks: decks,
+      filtered: _filterAndSort(decks),
+      showScopeModes: widget.showScopeModes,
+      showSearch: widget.showSearch,
+      showBulkActions: widget.showBulkActions,
+      shrinkWrap: widget.shrinkWrap,
+      padding: widget.padding,
+      physics: widget.physics,
+      query: _query,
+      onlyWithDue: _onlyWithDue,
+      sort: _sort,
+      onQueryChanged: (v) => setState(() => _query = v),
+      onOnlyWithDueChanged: (v) => setState(() => _onlyWithDue = v),
+      onSortChanged: (v) => setState(() => _sort = v),
+      onScopeChanged: _invalidateScope,
+    );
+  }
+}
+
+class _DeckPickerBody extends ConsumerWidget {
+  final StudyScope scope;
+  final List<AnkiDroidDeck> decks;
+  final List<AnkiDroidDeck> filtered;
+  final bool showScopeModes;
+  final bool showSearch;
+  final bool showBulkActions;
+  final bool shrinkWrap;
+  final EdgeInsetsGeometry? padding;
+  final ScrollPhysics? physics;
+  final String query;
+  final bool onlyWithDue;
+  final _DeckSort sort;
+  final ValueChanged<String> onQueryChanged;
+  final ValueChanged<bool> onOnlyWithDueChanged;
+  final ValueChanged<_DeckSort> onSortChanged;
+  final Future<void> Function() onScopeChanged;
+
+  const _DeckPickerBody({
+    required this.scope,
+    required this.decks,
+    required this.filtered,
+    required this.showScopeModes,
+    required this.showSearch,
+    required this.showBulkActions,
+    required this.shrinkWrap,
+    required this.padding,
+    required this.physics,
+    required this.query,
+    required this.onlyWithDue,
+    required this.sort,
+    required this.onQueryChanged,
+    required this.onOnlyWithDueChanged,
+    required this.onSortChanged,
+    required this.onScopeChanged,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final enabledCount = countEnabledDecks(scope, decks);
+    final dueTotal = countDueInScope(scope, decks);
+
+    final scrollPhysics = physics ??
+        (shrinkWrap
+            ? const NeverScrollableScrollPhysics()
+            : const AlwaysScrollableScrollPhysics());
+
+    Widget buildScrollView() {
+      final slivers = <Widget>[
+          if (showScopeModes) ...[
+            SliverToBoxAdapter(
+              child: _ScopeModeHeader(scope: scope, onChanged: onScopeChanged),
+            ),
+            const SliverToBoxAdapter(child: Divider(height: 1)),
+          ],
+          if (showSearch)
+            SliverToBoxAdapter(
+              child: _DeckSearchBar(
+                query: query,
+                onlyWithDue: onlyWithDue,
+                sort: sort,
+                onQueryChanged: onQueryChanged,
+                onOnlyWithDueChanged: onOnlyWithDueChanged,
+                onSortChanged: onSortChanged,
+              ),
+            ),
+          if (showBulkActions && scope.mode != StudyScopeMode.single)
+            SliverToBoxAdapter(
+              child: _BulkActionsHeader(
+                enabledCount: enabledCount,
+                totalCount: decks.length,
+                dueTotal: dueTotal,
+                decks: decks,
+                onChanged: onScopeChanged,
+              ),
+            ),
+          if (filtered.isEmpty)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                child: Text(
+                  'No decks match your search.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            )
+          else
+            SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) => _DeckPickerRow(
+                  deck: filtered[index],
+                  scope: scope,
+                  onChanged: onScopeChanged,
+                ),
+                childCount: filtered.length,
+              ),
+            ),
+        ];
+
+      final scrollView = CustomScrollView(
+        shrinkWrap: shrinkWrap,
+        physics: scrollPhysics,
+        slivers: slivers,
+      );
+
+      if (padding == null) return scrollView;
+      return Padding(padding: padding!, child: scrollView);
+    }
+
+    if (scope.mode != StudyScopeMode.single) {
+      return buildScrollView();
+    }
+
+    return RadioGroup<int>(
+      groupValue: scope.activeDeckId,
+      onChanged: (v) async {
+        await ref.read(studyScopeServiceProvider).setActiveDeck(v);
+        await onScopeChanged();
       },
+      child: buildScrollView(),
     );
   }
 }

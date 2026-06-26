@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -35,9 +37,10 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _refresh();
-    // Warm app list for the block-apps step.
+    // Warm app list for the block-apps step; warm decks for the next step.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(installedAppsProvider.future);
+      _warmAppData();
+      _warmDeckData();
     });
   }
 
@@ -57,10 +60,12 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
     final perm = ref.read(permissionServiceProvider);
     final anki = ref.read(ankiDroidServiceProvider);
     final hadUsage = _hasUsage;
+    final hadAnkiReady = _ankiInstalled && _ankiPermission;
     final usage = await perm.hasUsageAccessPermission();
     final overlay = await perm.hasOverlayPermission();
     final ankiStatus = await anki.getStatus();
     if (!mounted) return;
+    final ankiReady = ankiStatus.installed && ankiStatus.permissionGranted;
     setState(() {
       _hasUsage = usage;
       _hasOverlay = overlay;
@@ -68,9 +73,27 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
       _ankiPermission = ankiStatus.permissionGranted;
     });
     ref.invalidate(blockingPermissionsProvider);
-    if (usage && (!hadUsage || _page == 4)) {
-      await ref.read(installedAppsProvider.notifier).refresh();
+    if (ankiReady && !hadAnkiReady) {
+      ref.invalidate(ankiDroidStatusProvider);
+      _warmDeckData();
     }
+    if (usage && !hadUsage) {
+      unawaited(ref.read(installedAppsProvider.notifier).refresh());
+    } else if (usage && _page == 4) {
+      // Re-sort with screen time after returning from system settings.
+      unawaited(ref.read(installedAppsProvider.notifier).refresh());
+    }
+  }
+
+  void _warmAppData() {
+    ref.read(installedAppsProvider.future);
+  }
+
+  /// Start loading deck list + scope while the user is still on earlier steps.
+  void _warmDeckData() {
+    if (!_ankiInstalled || !_ankiPermission) return;
+    ref.read(studyScopeProvider.future);
+    ref.read(ankiDroidDecksProvider.future);
   }
 
   Future<void> _finish() async {
@@ -107,9 +130,15 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
                 controller: _controller,
                 onPageChanged: (i) {
                   setState(() => _page = i);
-                  if (i == 4 && _hasUsage) {
-                    ref.read(installedAppsProvider.notifier).refresh();
+                  if (i == 3) {
+                    _warmAppData();
+                    if (_hasUsage) {
+                      unawaited(
+                        ref.read(installedAppsProvider.notifier).refresh(),
+                      );
+                    }
                   }
+                  if (i == 4) _warmDeckData();
                 },
                 children: [
                   const _IntroPage(),
@@ -141,6 +170,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
                       }
                       await _refresh();
                       ref.invalidate(ankiDroidStatusProvider);
+                      _warmDeckData();
                     },
                   ),
                   _PermissionPage(
@@ -172,10 +202,13 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
                   _SetupScrollPage(
                     title: 'Block your worst apps',
                     subtitle:
-                        'Toggle the apps that should stay locked until you study.',
+                        'Sorted by your screen time. Social apps are suggested — '
+                        'toggle what stays locked until you study.',
+                    expandChild: true,
                     child: AppBlockSetupPanel(
-                      suggestedOnly: true,
                       showUsage: _hasUsage,
+                      shrinkWrap: false,
+                      padding: EdgeInsets.zero,
                     ),
                   ),
                   _SetupScrollPage(
@@ -183,7 +216,11 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
                     subtitle:
                         'Reviews from selected decks count toward unlocking. '
                         'You can switch decks in AnkiDroid anytime.',
-                    child: const DeckPickerPanel(),
+                    expandChild: true,
+                    child: const DeckPickerPanel(
+                      shrinkWrap: false,
+                      padding: EdgeInsets.zero,
+                    ),
                   ),
                   _SetupScrollPage(
                     title: 'Set your goals',
@@ -247,30 +284,49 @@ class _SetupScrollPage extends StatelessWidget {
   final String title;
   final String subtitle;
   final Widget child;
+  final bool expandChild;
 
   const _SetupScrollPage({
     required this.title,
     required this.subtitle,
     required this.child,
+    this.expandChild = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final header = <Widget>[
+      Text(
+        title,
+        style: Theme.of(context).textTheme.headlineMedium,
+      ),
+      const SizedBox(height: 8),
+      Text(
+        subtitle,
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: AppTheme.onSurfaceVariant,
+            ),
+      ),
+      const SizedBox(height: 20),
+    ];
+
+    if (expandChild) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ...header,
+            Expanded(child: child),
+          ],
+        ),
+      );
+    }
+
     return ListView(
       padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
       children: [
-        Text(
-          title,
-          style: Theme.of(context).textTheme.headlineMedium,
-        ),
-        const SizedBox(height: 8),
-        Text(
-          subtitle,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: AppTheme.onSurfaceVariant,
-              ),
-        ),
-        const SizedBox(height: 20),
+        ...header,
         child,
       ],
     );

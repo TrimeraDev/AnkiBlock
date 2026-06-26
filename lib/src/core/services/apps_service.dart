@@ -80,9 +80,8 @@ extension CachedInstalledAppX on CachedInstalledApp {
       );
 }
 
-/// Common social / distracting apps. Used to auto-select on first scan.
-const Set<String> kSuggestedBlockPackages = {
-  // Social
+/// Social apps highlighted during onboarding setup.
+const Set<String> kSuggestedSocialPackages = {
   'com.zhiliaoapp.musically', // TikTok (intl)
   'com.ss.android.ugc.trill', // TikTok (other regions)
   'com.instagram.android',
@@ -95,6 +94,11 @@ const Set<String> kSuggestedBlockPackages = {
   'com.pinterest',
   'com.linkedin.android',
   'com.discord',
+};
+
+/// Common social / distracting apps. Used in the blocking screen banner.
+const Set<String> kSuggestedBlockPackages = {
+  ...kSuggestedSocialPackages,
   // Video
   'com.google.android.youtube',
   'com.netflix.mediaclient',
