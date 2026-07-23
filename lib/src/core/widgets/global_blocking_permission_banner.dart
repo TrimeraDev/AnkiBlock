@@ -3,9 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../di/providers.dart';
 import '../navigation/router.dart';
+import '../services/permission_service.dart';
 import '../theme/app_theme.dart';
 
-/// Shown under the status bar when Android blocking permissions are incomplete.
+/// Shown under the status bar when Android blocking or protection is incomplete.
 /// Hidden during onboarding, where those permissions are requested step-by-step.
 class GlobalBlockingPermissionBanner extends ConsumerWidget {
   const GlobalBlockingPermissionBanner({super.key});
@@ -19,21 +20,14 @@ class GlobalBlockingPermissionBanner extends ConsumerWidget {
         final path = router.routeInformationProvider.value.uri.path;
         if (path == '/onboarding') return const SizedBox.shrink();
 
-        final async = ref.watch(blockingPermissionsProvider);
+        final async = ref.watch(protectionStatusProvider);
         return async.when(
-          data: (s) {
-            if (s.usage && s.overlay) return const SizedBox.shrink();
-            return _BannerBody(
-              missingUsage: !s.usage,
-              missingOverlay: !s.overlay,
-            );
+          data: (status) {
+            if (!status.needsAttention) return const SizedBox.shrink();
+            return _BannerBody(status: status);
           },
           loading: () => const SizedBox.shrink(),
-          error: (_, __) => const _BannerBody(
-            missingUsage: true,
-            missingOverlay: true,
-            verifyFailed: true,
-          ),
+          error: (_, __) => const _BannerBody(verifyFailed: true),
         );
       },
     );
@@ -41,29 +35,20 @@ class GlobalBlockingPermissionBanner extends ConsumerWidget {
 }
 
 class _BannerBody extends ConsumerWidget {
-  final bool missingUsage;
-  final bool missingOverlay;
+  final ProtectionStatus? status;
   final bool verifyFailed;
 
   const _BannerBody({
-    required this.missingUsage,
-    required this.missingOverlay,
+    this.status,
     this.verifyFailed = false,
   });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final parts = <String>[
-      if (missingUsage) 'Usage access',
-      if (missingOverlay) 'Display over other apps',
-    ];
-    final label = parts.join(' and ');
     final message = verifyFailed
-        ? 'Could not verify blocking permissions. Open Permissions to review settings.'
-        : (parts.length == 2
-            ? '$label are turned off. App blocking will not work until you enable them.'
-            : '$label is turned off. App blocking will not work until you enable it.');
+        ? 'Could not verify protection status. Open Permissions to review settings.'
+        : _messageFor(status!);
 
     return Material(
       color: AppTheme.warning.withValues(alpha: 0.14),
@@ -97,5 +82,29 @@ class _BannerBody extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  String _messageFor(ProtectionStatus status) {
+    if (!status.usage || !status.overlay) {
+      final parts = <String>[
+        if (!status.usage) 'Usage access',
+        if (!status.overlay) 'Display over other apps',
+      ];
+      final label = parts.join(' and ');
+      return parts.length == 2
+          ? '$label are turned off. App blocking will not work until you enable them.'
+          : '$label is turned off. App blocking will not work until you enable it.';
+    }
+    if (status.hasBlockedApps &&
+        status.blockingEnabled &&
+        !status.monitorRunning) {
+      return 'App blocking is not active. Open AnkiBlock or check Permissions '
+          'to restart protection after a reboot.';
+    }
+    if (!status.batteryUnrestricted) {
+      return 'Battery optimization is on. Blocking may stop after reboot until '
+          'you exempt AnkiBlock from battery restrictions.';
+    }
+    return 'Protection needs attention. Open Permissions to review settings.';
   }
 }

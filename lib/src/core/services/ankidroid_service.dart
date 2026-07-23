@@ -198,9 +198,11 @@ class AnkiDroidCounts {
   static const zero =
       AnkiDroidCounts(learnCount: 0, reviewCount: 0, newCount: 0);
 
-  /// What AnkiBlock treats as the "size of the queue" — cards a user can
-  /// actually answer right now.
+  /// Full AnkiDroid studyable queue (new + learning + reviews).
   int get studyable => learnCount + reviewCount + newCount;
+
+  /// Anki's daily obligation: learning + to-review (excludes new cards).
+  int get obligationDue => learnCount + reviewCount;
 
   /// Same shape the gate/today UI used to expect from the local DB
   /// (`due` = learn + review, `newCount` = new).

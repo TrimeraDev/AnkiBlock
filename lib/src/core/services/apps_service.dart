@@ -232,12 +232,16 @@ class AppsService {
     required int unlockDurationMinutes,
     required int bypassSeconds,
     required bool isEnabled,
+    required String studyMode,
+    required String blockingMode,
   }) async {
     if (!Platform.isAndroid) return;
     await _channel.invokeMethod('syncBlockRuleSettings', {
       'unlockDurationMinutes': unlockDurationMinutes,
       'bypassSeconds': bypassSeconds,
       'isEnabled': isEnabled,
+      'studyMode': studyMode,
+      'blockingMode': blockingMode,
     });
   }
 

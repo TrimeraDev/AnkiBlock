@@ -50,10 +50,19 @@ class AppMonitorService : Service() {
         const val KEY_DAILY_GOAL = "daily_goal"
         const val KEY_DAILY_REVIEWED = "daily_cards_reviewed"
         const val KEY_STUDY_DAY = "study_day_key"
+        const val KEY_STUDY_MODE = "study_mode"
         const val KEY_PASSIVE_APPLIED_TO_DAILY = "passive_applied_to_daily"
 
         /** Scoped deck ids for passive AnkiDroid study tracking. */
         const val KEY_SCOPE_DECK_IDS = "scope_deck_ids"
+
+        const val STUDY_MODE_DUE_CARDS = "dueCards"
+        const val STUDY_MODE_CARD_COUNT = "cardCount"
+
+        const val KEY_BLOCKING_MODE = "blocking_mode"
+        const val KEY_ALLOWLIST = "allowlist_packages_csv"
+        const val BLOCKING_MODE_SELECTED = "selectedApps"
+        const val BLOCKING_MODE_LOCKDOWN = "lockdown"
 
         const val KEY_PASSIVE_STUDY_DAY = "passive_study_day"
         const val KEY_PASSIVE_CARD_KEYS = "passive_card_keys"
@@ -103,20 +112,67 @@ class AppMonitorService : Service() {
             unlockDurationMinutes: Int,
             bypassSeconds: Int,
             isEnabled: Boolean = true,
+            studyMode: String = STUDY_MODE_CARD_COUNT,
+            blockingMode: String = BLOCKING_MODE_SELECTED,
         ) {
             val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             val unlockMs = (unlockDurationMinutes.coerceAtLeast(1) * 60 * 1000L)
+            val mode = if (studyMode == STUDY_MODE_DUE_CARDS) {
+                STUDY_MODE_DUE_CARDS
+            } else {
+                STUDY_MODE_CARD_COUNT
+            }
+            val blockMode = if (blockingMode == BLOCKING_MODE_LOCKDOWN) {
+                BLOCKING_MODE_LOCKDOWN
+            } else {
+                BLOCKING_MODE_SELECTED
+            }
+            val allowlist = buildDefaultAllowlist(context)
             prefs.edit()
                 .putLong(KEY_UNLOCK_DURATION_MS, unlockMs)
                 .putInt(KEY_BYPASS_SECONDS, bypassSeconds.coerceAtLeast(1))
                 .putBoolean(KEY_IS_ENABLED, isEnabled)
+                .putString(KEY_STUDY_MODE, mode)
+                .putString(KEY_BLOCKING_MODE, blockMode)
+                .putString(KEY_ALLOWLIST, allowlist.joinToString("|"))
                 .apply()
+        }
+
+        /** Packages always allowed during lockdown (study + phone). */
+        fun buildDefaultAllowlist(context: Context): List<String> {
+            val packages = linkedSetOf(
+                context.packageName,
+                ANKIDROID_PACKAGE,
+            )
+            packages.addAll(resolveDialerPackages(context))
+            return packages.toList()
+        }
+
+        private fun resolveDialerPackages(context: Context): Set<String> {
+            val found = linkedSetOf<String>()
+            try {
+                val dial = Intent(Intent.ACTION_DIAL)
+                val matches = context.packageManager.queryIntentActivities(dial, 0)
+                for (info in matches) {
+                    val pkg = info.activityInfo?.packageName ?: continue
+                    found.add(pkg)
+                }
+            } catch (_: Throwable) {
+            }
+            // Common OEM dialers as fallbacks.
+            found.add("com.google.android.dialer")
+            found.add("com.android.dialer")
+            found.add("com.samsung.android.dialer")
+            found.add("com.android.server.telecom")
+            return found
         }
 
         fun isBlockingEnabled(context: Context): Boolean {
             val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             return prefs.getBoolean(KEY_IS_ENABLED, true)
         }
+
+        fun isRunning(): Boolean = runningInstance != null
 
         fun grantTempUnlock(
             context: Context,
@@ -640,6 +696,38 @@ class AppMonitorService : Service() {
         return total
     }
 
+    private fun aggregateDeckObligationTotal(api: AnkiDroidApi, deckIds: List<Long>): Int {
+        var total = 0
+        for (deckId in deckIds) {
+            total += try {
+                api.deckObligationTotal(deckId)
+            } catch (e: Exception) {
+                Log.w(TAG, "obligation-count for deck=$deckId failed", e)
+                0
+            }
+        }
+        return total
+    }
+
+    /** Mode-aware goal: card count, or Anki learn+review cleared (excludes new). */
+    private fun isBlockingGoalComplete(): Boolean {
+        val mode = prefs.getString(KEY_STUDY_MODE, STUDY_MODE_CARD_COUNT)
+            ?: STUDY_MODE_CARD_COUNT
+        if (mode == STUDY_MODE_DUE_CARDS) {
+            val api = ankiApi ?: return false
+            if (!api.hasPermission()) return false
+            val deckIds = parseScopeDeckIds(prefs.getString(KEY_SCOPE_DECK_IDS, null))
+            if (deckIds.isEmpty()) return false
+            return try {
+                aggregateDeckObligationTotal(api, deckIds) <= 0
+            } catch (e: Exception) {
+                Log.w(TAG, "obligation-goal check failed", e)
+                false
+            }
+        }
+        return isDailyGoalComplete(prefs)
+    }
+
     private fun ensureMultiDeckSnapshot(
         api: AnkiDroidApi,
         deckIds: List<Long>,
@@ -838,13 +926,9 @@ class AppMonitorService : Service() {
         lastForegroundPackage = pkg
 
         if (!AppMonitorService.isBlockingEnabled(this)) return
+        if (!shouldGatePackage(pkg)) return
 
-        val blockedCsv = prefs.getString(KEY_BLOCKED, "") ?: ""
-        if (blockedCsv.isEmpty()) return
-        val blocked = blockedCsv.split("|").filter { it.isNotEmpty() }.toSet()
-        if (pkg !in blocked) return
-
-        if (isDailyGoalComplete(prefs)) return
+        if (isBlockingGoalComplete()) return
         if (isPackageUnlocked(prefs, pkg)) return
 
         val now = System.currentTimeMillis()
@@ -861,13 +945,9 @@ class AppMonitorService : Service() {
         if (pkg == packageName) return
 
         if (!AppMonitorService.isBlockingEnabled(this)) return
+        if (!shouldGatePackage(pkg)) return
 
-        val blockedCsv = prefs.getString(KEY_BLOCKED, "") ?: ""
-        if (blockedCsv.isEmpty()) return
-        val blocked = blockedCsv.split("|").filter { it.isNotEmpty() }.toSet()
-        if (pkg !in blocked) return
-
-        if (isDailyGoalComplete(prefs)) return
+        if (isBlockingGoalComplete()) return
         if (!hadUnlockThatExpired(prefs, pkg)) return
 
         val now = System.currentTimeMillis()
@@ -878,6 +958,30 @@ class AppMonitorService : Service() {
         val displayName = lookupDisplayName(pkg) ?: pkg
         prefs.edit().remove(unlockUntilKey(pkg)).apply()
         launchGate(pkg, displayName)
+    }
+
+    /** Selected-apps: blocklist. Lockdown: everything except allowlist. */
+    private fun shouldGatePackage(pkg: String): Boolean {
+        val mode = prefs.getString(KEY_BLOCKING_MODE, BLOCKING_MODE_SELECTED)
+            ?: BLOCKING_MODE_SELECTED
+        if (mode == BLOCKING_MODE_LOCKDOWN) {
+            if (pkg == ANKIDROID_PACKAGE) return false
+            val allowCsv = prefs.getString(KEY_ALLOWLIST, "") ?: ""
+            val allow = allowCsv.split("|").filter { it.isNotEmpty() }.toSet()
+            if (allow.isEmpty()) {
+                // Safety: rebuild default allowlist if prefs were wiped.
+                val rebuilt = buildDefaultAllowlist(this)
+                prefs.edit()
+                    .putString(KEY_ALLOWLIST, rebuilt.joinToString("|"))
+                    .apply()
+                return pkg !in rebuilt
+            }
+            return pkg !in allow
+        }
+        val blockedCsv = prefs.getString(KEY_BLOCKED, "") ?: ""
+        if (blockedCsv.isEmpty()) return false
+        val blocked = blockedCsv.split("|").filter { it.isNotEmpty() }.toSet()
+        return pkg in blocked
     }
 
     private fun lookupDisplayName(pkg: String): String? {

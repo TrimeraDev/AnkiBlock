@@ -3,10 +3,160 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../di/providers.dart';
 import '../services/apps_service.dart';
+import '../services/settings_protection_service.dart';
 import '../setup/setup_actions.dart';
 import '../theme/app_theme.dart';
 import '../utils/app_usage_format.dart';
+import '../utils/blocking_goal.dart';
 import 'brand_widgets.dart';
+
+/// Study mode picker: due cards (default) vs fixed card count.
+class StudyModePanel extends ConsumerWidget {
+  final StudyMode mode;
+  final int unlockGoal;
+  final int dailyGoal;
+  final bool showTitle;
+
+  const StudyModePanel({
+    super.key,
+    required this.mode,
+    required this.unlockGoal,
+    required this.dailyGoal,
+    this.showTitle = true,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (showTitle) ...[
+          Text('Study mode', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 4),
+          Text(
+            'Choose how blocked apps unlock for the day.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 16),
+        ],
+        _ModeOption(
+          selected: mode == StudyMode.dueCards,
+          title: 'Anki queue',
+          subtitle:
+              'Blocked apps unlock when learning & reviews are done in '
+              'your selected decks. New cards are optional.',
+          badge: 'Recommended',
+          onTap: () => updateStudyMode(ref, StudyMode.dueCardsValue),
+        ),
+        const SizedBox(height: 10),
+        _ModeOption(
+          selected: mode == StudyMode.cardCount,
+          title: 'Card count',
+          subtitle:
+              'Study a fixed number of cards per day to unlock everything '
+              'until 3am. Ignores AnkiDroid\'s queue.',
+          onTap: () async {
+            final due =
+                ref.read(studyCountsProvider).valueOrNull?.obligationDue ?? 0;
+            if (isWeakerStudyMode(
+              current: mode,
+              proposed: StudyMode.cardCount,
+              obligationDue: due,
+            )) {
+              final ok = await ref
+                  .read(settingsProtectionServiceProvider)
+                  .requestProtectedEdit(
+                    context,
+                    kind: ProtectedEditKind.switchToWeakerStudyMode,
+                  );
+              if (!ok) return;
+            }
+            await updateStudyMode(ref, StudyMode.cardCountValue);
+          },
+        ),
+        const SizedBox(height: 20),
+        if (mode == StudyMode.cardCount) ...[
+          DailyGoalPanel(initial: dailyGoal, showTitle: true),
+          const SizedBox(height: 24),
+        ],
+        UnlockGoalPanel(initial: unlockGoal, showTitle: true),
+      ],
+    );
+  }
+}
+
+class _ModeOption extends StatelessWidget {
+  final bool selected;
+  final String title;
+  final String subtitle;
+  final String? badge;
+  final VoidCallback onTap;
+
+  const _ModeOption({
+    required this.selected,
+    required this.title,
+    required this.subtitle,
+    this.badge,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return BrandCard(
+      color: selected ? AppTheme.accent.withValues(alpha: 0.12) : AppTheme.cardElevated,
+      onTap: onTap,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            selected ? Icons.radio_button_checked : Icons.radio_button_off,
+            color: selected ? AppTheme.accent : AppTheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                    ),
+                    if (badge != null)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppTheme.accent.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          badge!,
+                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                color: AppTheme.accent,
+                                fontWeight: FontWeight.w600,
+                              ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 /// Preset chips + slider for cards required per unlock.
 class UnlockGoalPanel extends ConsumerStatefulWidget {
@@ -33,11 +183,13 @@ class _UnlockGoalPanelState extends ConsumerState<UnlockGoalPanel> {
   static const _presets = [10, 25, 50];
 
   late int _value;
+  late int _committed;
 
   @override
   void initState() {
     super.initState();
     _value = widget.initial;
+    _committed = widget.initial;
   }
 
   @override
@@ -45,6 +197,7 @@ class _UnlockGoalPanelState extends ConsumerState<UnlockGoalPanel> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.initial != widget.initial) {
       _value = widget.initial;
+      _committed = widget.initial;
     }
   }
 
@@ -54,7 +207,20 @@ class _UnlockGoalPanelState extends ConsumerState<UnlockGoalPanel> {
   }
 
   Future<void> _persist(int v) async {
+    if (isWeakeningUnlockGoal(current: _committed, proposed: v)) {
+      final ok = await ref
+          .read(settingsProtectionServiceProvider)
+          .requestProtectedEdit(
+            context,
+            kind: ProtectedEditKind.lowerUnlockGoal,
+          );
+      if (!ok) {
+        setState(() => _value = _committed);
+        return;
+      }
+    }
     await updateCardsRequired(ref, v);
+    setState(() => _committed = v);
   }
 
   @override
@@ -148,11 +314,13 @@ class _DailyGoalPanelState extends ConsumerState<DailyGoalPanel> {
   static const _presets = [20, 30, 50];
 
   late int _value;
+  late int _committed;
 
   @override
   void initState() {
     super.initState();
     _value = widget.initial;
+    _committed = widget.initial;
   }
 
   @override
@@ -160,6 +328,7 @@ class _DailyGoalPanelState extends ConsumerState<DailyGoalPanel> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.initial != widget.initial) {
       _value = widget.initial;
+      _committed = widget.initial;
     }
   }
 
@@ -169,7 +338,20 @@ class _DailyGoalPanelState extends ConsumerState<DailyGoalPanel> {
   }
 
   Future<void> _persist(int v) async {
+    if (isWeakeningDailyGoal(current: _committed, proposed: v)) {
+      final ok = await ref
+          .read(settingsProtectionServiceProvider)
+          .requestProtectedEdit(
+            context,
+            kind: ProtectedEditKind.lowerDailyGoal,
+          );
+      if (!ok) {
+        setState(() => _value = _committed);
+        return;
+      }
+    }
     await updateDailyCardsGoal(ref, v);
+    setState(() => _committed = v);
   }
 
   @override
@@ -328,6 +510,7 @@ class AppBlockSetupPanel extends ConsumerWidget {
                 ref,
                 app: app,
                 blocked: v,
+                context: context,
               ),
             );
           },

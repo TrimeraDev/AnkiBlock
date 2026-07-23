@@ -8,7 +8,9 @@ import '../../core/assets/app_assets.dart';
 import '../../core/di/providers.dart';
 import '../../core/navigation/router.dart';
 import '../../core/services/ankidroid_service.dart';
+import '../../core/setup/setup_actions.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/blocking_goal.dart';
 import '../../core/widgets/brand_widgets.dart';
 import '../../core/widgets/deck_picker_panel.dart';
 import '../../core/widgets/setup_panels.dart';
@@ -31,6 +33,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
   bool _ankiPermission = false;
   bool _hasUsage = false;
   bool _hasOverlay = false;
+  bool _autoSelectedDueDecks = false;
 
   @override
   void initState() {
@@ -73,6 +76,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
       _ankiPermission = ankiStatus.permissionGranted;
     });
     ref.invalidate(blockingPermissionsProvider);
+    ref.invalidate(protectionStatusProvider);
     if (ankiReady && !hadAnkiReady) {
       ref.invalidate(ankiDroidStatusProvider);
       _warmDeckData();
@@ -101,6 +105,29 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
     if (mounted) context.go('/');
   }
 
+  /// Prefer decks that currently have due cards for new installs.
+  Future<void> _autoSelectDecksWithDue() async {
+    if (_autoSelectedDueDecks) return;
+    _autoSelectedDueDecks = true;
+    try {
+      final status = await ref.read(ankiDroidStatusProvider.future);
+      if (!status.isReady) return;
+      final decks = await ref.read(ankiDroidDecksProvider.future);
+      if (decks.isEmpty) return;
+      final withDue = decks.where((d) => d.totalDue > 0).toList();
+      if (withDue.isEmpty) return;
+      final svc = ref.read(studyScopeServiceProvider);
+      final disabled =
+          decks.where((d) => d.totalDue == 0).map((d) => d.id).toSet();
+      await svc.setDisabledDeckIds(disabled);
+      ref.invalidate(studyScopeProvider);
+      ref.invalidate(studyCountsProvider);
+      await syncStudyScopeToNative(ref);
+    } catch (_) {
+      // Non-fatal — user can still pick decks manually.
+    }
+  }
+
   void _next() {
     if (_page < _pageCount - 1) {
       _controller.nextPage(
@@ -118,8 +145,9 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
     final anki = ref.read(ankiDroidServiceProvider);
     final ankiReady = _ankiInstalled && _ankiPermission;
     final ruleAsync = ref.watch(blockRuleProvider);
-    final dailyGoal = ruleAsync.valueOrNull?.dailyCardsGoal ?? 30;
     final unlockGoal = ruleAsync.valueOrNull?.cardsRequired ?? 10;
+    final blockingMode =
+        BlockingMode.fromStorage(ruleAsync.valueOrNull?.blockingMode);
 
     return Scaffold(
       body: SafeArea(
@@ -139,6 +167,10 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
                     }
                   }
                   if (i == 4) _warmDeckData();
+                  if (i == 5) {
+                    _warmDeckData();
+                    unawaited(_autoSelectDecksWithDue());
+                  }
                 },
                 children: [
                   const _IntroPage(),
@@ -200,22 +232,47 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
                     },
                   ),
                   _SetupScrollPage(
-                    title: 'Block your worst apps',
+                    title: 'How should apps stay locked?',
                     subtitle:
-                        'Sorted by your screen time. Social apps are suggested — '
-                        'toggle what stays locked until you study.',
+                        'Lock down the phone (recommended), or pick specific apps.',
                     expandChild: true,
-                    child: AppBlockSetupPanel(
-                      showUsage: _hasUsage,
-                      shrinkWrap: false,
-                      padding: EdgeInsets.zero,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _OnboardingBlockingChoice(
+                          mode: blockingMode,
+                          onChanged: (m) =>
+                              updateBlockingMode(ref, m.storageValue),
+                        ),
+                        const SizedBox(height: 16),
+                        if (blockingMode == BlockingMode.lockdown)
+                          Card(
+                            child: Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Text(
+                                'Most apps stay locked until learning & reviews '
+                                'are done. AnkiDroid, Phone, and AnkiBlock stay '
+                                'available. Emergency calls always work.',
+                                style: Theme.of(context).textTheme.bodyMedium,
+                              ),
+                            ),
+                          )
+                        else
+                          Expanded(
+                            child: AppBlockSetupPanel(
+                              showUsage: _hasUsage,
+                              shrinkWrap: false,
+                              padding: EdgeInsets.zero,
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                   _SetupScrollPage(
                     title: 'Choose decks to study',
                     subtitle:
-                        'Reviews from selected decks count toward unlocking. '
-                        'You can switch decks in AnkiDroid anytime.',
+                        'Learning & reviews from selected decks unlock apps. '
+                        'Decks with due cards are selected by default.',
                     expandChild: true,
                     child: const DeckPickerPanel(
                       shrinkWrap: false,
@@ -223,24 +280,14 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
                     ),
                   ),
                   _SetupScrollPage(
-                    title: 'Set your goals',
+                    title: 'Cards per app unlock',
                     subtitle:
-                        'Hit your daily goal to unlock everything until 3am. '
-                        'Otherwise study a smaller batch each time you open a '
-                        'blocked app.',
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        DailyGoalPanel(
-                          initial: dailyGoal,
-                          showTitle: false,
-                        ),
-                        const SizedBox(height: 24),
-                        UnlockGoalPanel(
-                          initial: unlockGoal,
-                          showTitle: false,
-                        ),
-                      ],
+                        'Study this many cards each time you open a blocked app. '
+                        'Your daily unlock follows AnkiDroid\'s learning & '
+                        'review counts automatically.',
+                    child: UnlockGoalPanel(
+                      initial: unlockGoal,
+                      showTitle: false,
                     ),
                   ),
                 ],
@@ -275,6 +322,85 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _OnboardingBlockingChoice extends StatelessWidget {
+  final BlockingMode mode;
+  final ValueChanged<BlockingMode> onChanged;
+
+  const _OnboardingBlockingChoice({
+    required this.mode,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        _ChoiceCard(
+          selected: mode == BlockingMode.lockdown,
+          title: 'Lock down phone',
+          subtitle: 'Recommended · block almost everything until you study',
+          onTap: () => onChanged(BlockingMode.lockdown),
+        ),
+        const SizedBox(height: 10),
+        _ChoiceCard(
+          selected: mode == BlockingMode.selectedApps,
+          title: 'Choose apps to block',
+          subtitle: 'Only the apps you pick stay locked',
+          onTap: () => onChanged(BlockingMode.selectedApps),
+        ),
+      ],
+    );
+  }
+}
+
+class _ChoiceCard extends StatelessWidget {
+  final bool selected;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  const _ChoiceCard({
+    required this.selected,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return BrandCard(
+      color: selected
+          ? AppTheme.accent.withValues(alpha: 0.12)
+          : AppTheme.cardElevated,
+      onTap: onTap,
+      child: Row(
+        children: [
+          Icon(
+            selected ? Icons.radio_button_checked : Icons.radio_button_off,
+            color: selected ? AppTheme.accent : AppTheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+                const SizedBox(height: 2),
+                Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

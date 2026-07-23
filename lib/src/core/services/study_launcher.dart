@@ -6,6 +6,7 @@ import 'ankidroid_service.dart';
 import 'apps_service.dart';
 import 'study_scope_service.dart';
 import '../utils/study_day.dart';
+import '../utils/blocking_goal.dart';
 
 /// Picks which AnkiDroid deck to open when starting a study session.
 ///
@@ -30,8 +31,10 @@ int resolveLaunchDeckId(
   return best?.id ?? allowedIds.first;
 }
 
-/// Cards to study in the next session: remaining daily cards when the daily
-/// goal is not met, otherwise the per-unlock amount.
+/// Cards to study in the next session.
+///
+/// Gate sessions always use the unlock goal. Home sessions use remaining
+/// daily cards (card-count mode) or min(due, unlock goal) (due-cards mode).
 Future<int> resolveSessionTarget(
   WidgetRef ref, {
   bool forGate = false,
@@ -40,11 +43,30 @@ Future<int> resolveSessionTarget(
   final unlockGoal = rule?.cardsRequired ?? 10;
   if (forGate) return unlockGoal;
 
+  final mode = StudyMode.fromStorage(rule?.studyMode);
+  if (mode == StudyMode.dueCards) {
+    final counts = await ref.read(studyCountsProvider.future);
+    final obligation = counts.obligationDue;
+    if (obligation > 0) {
+      return obligation < unlockGoal ? obligation : unlockGoal;
+    }
+    // Obligation done — still allow studying remaining new cards.
+    if (counts.newCount > 0) {
+      return counts.newCount < unlockGoal ? counts.newCount : unlockGoal;
+    }
+    return unlockGoal;
+  }
+
   final dailyGoal = rule?.dailyCardsGoal ?? 30;
   final day = studyDayKey();
   final reviewed =
       (await ref.read(databaseProvider).getDailyStat(day))?.cardsReviewed ?? 0;
-  if (isDailyGoalComplete(dailyGoal: dailyGoal, cardsReviewed: reviewed)) {
+  if (isBlockingGoalComplete(
+    mode: mode,
+    dailyCardsGoal: dailyGoal,
+    cardsReviewed: reviewed,
+    obligationDue: 0,
+  )) {
     return unlockGoal;
   }
   final remaining = (dailyGoal - reviewed).clamp(0, dailyGoal);

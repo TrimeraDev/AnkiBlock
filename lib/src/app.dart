@@ -9,6 +9,7 @@ import 'core/services/apps_service.dart';
 import 'core/setup/setup_actions.dart';
 import 'core/theme/app_theme.dart';
 import 'core/utils/study_day.dart';
+import 'core/utils/blocking_goal.dart';
 import 'core/widgets/global_blocking_permission_banner.dart';
 
 class AnkiBlockApp extends ConsumerStatefulWidget {
@@ -48,6 +49,7 @@ class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
         unawaited(_recordAppOpen());
       }
       ref.invalidate(blockingPermissionsProvider);
+      ref.invalidate(protectionStatusProvider);
       unawaited(_onResume());
     }
   }
@@ -137,9 +139,13 @@ class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
     final day = studyDayKey();
     final reviewed =
         (await ref.read(databaseProvider).getDailyStat(day))?.cardsReviewed ?? 0;
-    if (isDailyGoalComplete(
-      dailyGoal: rule?.dailyCardsGoal ?? 0,
+    final mode = StudyMode.fromStorage(rule?.studyMode);
+    final due = (await ref.read(studyCountsProvider.future)).obligationDue;
+    if (isBlockingGoalComplete(
+      mode: mode,
+      dailyCardsGoal: rule?.dailyCardsGoal ?? 0,
       cardsReviewed: reviewed,
+      obligationDue: due,
     )) {
       await ref.read(appsServiceProvider).launchApp(req.packageName);
       return;

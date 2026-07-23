@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/utils/study_day.dart';
+import '../../core/utils/blocking_goal.dart';
 import '../../core/database/database.dart' as db;
 import '../../core/assets/app_assets.dart';
 import '../../core/di/providers.dart';
@@ -39,13 +40,23 @@ class TodayScreen extends ConsumerWidget {
 
     final dailyGoal = ruleAsync.valueOrNull?.dailyCardsGoal ?? 30;
     final unlockGoal = ruleAsync.valueOrNull?.cardsRequired ?? 10;
+    final mode = StudyMode.fromStorage(ruleAsync.valueOrNull?.studyMode);
     final reviewed = dailyStatsAsync.valueOrNull?.cardsReviewed ?? 0;
+    final counts = countsAsync.valueOrNull ?? AnkiDroidCounts.zero;
+    final obligation = counts.obligationDue;
+    final studyable = counts.studyable;
+    final goalComplete = isBlockingGoalComplete(
+      mode: mode,
+      dailyCardsGoal: dailyGoal,
+      cardsReviewed: reviewed,
+      obligationDue: obligation,
+    );
     final dailyRemaining = (dailyGoal - reviewed).clamp(0, dailyGoal);
-    final progress =
-        dailyGoal > 0 ? (reviewed / dailyGoal).clamp(0.0, 1.0) : 0.0;
-    final dailyComplete =
-        isDailyGoalComplete(dailyGoal: dailyGoal, cardsReviewed: reviewed);
-    final due = countsAsync.valueOrNull?.studyable ?? 0;
+    final progress = switch (mode) {
+      StudyMode.dueCards => obligation <= 0 ? 1.0 : 0.0,
+      StudyMode.cardCount =>
+        dailyGoal > 0 ? (reviewed / dailyGoal).clamp(0.0, 1.0) : 0.0,
+    };
     final decks = decksAsync.valueOrNull ?? const [];
     final scope = scopeAsync.valueOrNull;
     final hasDecksSelected = scope != null &&
@@ -96,12 +107,17 @@ class TodayScreen extends ConsumerWidget {
               _AnkiDroidStatusCard(ankiStatusAsync: ankiStatusAsync),
               _StudyHero(
                 progress: progress,
-                dailyComplete: dailyComplete,
+                goalComplete: goalComplete,
+                mode: mode,
                 reviewed: reviewed,
                 dailyGoal: dailyGoal,
                 dailyRemaining: dailyRemaining,
                 unlockGoal: unlockGoal,
-                due: due,
+                learnCount: counts.learnCount,
+                reviewCount: counts.reviewCount,
+                newCount: counts.newCount,
+                obligation: obligation,
+                studyable: studyable,
                 hasDecksSelected: hasDecksSelected,
               ),
               const SupportPromptBanner(),
@@ -109,12 +125,17 @@ class TodayScreen extends ConsumerWidget {
               Text('Your setup', style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 4),
               Text(
-                'Tap any section to change your daily or per-unlock goals.',
+                mode == StudyMode.dueCards
+                    ? 'Daily unlock follows AnkiDroid learning & reviews. '
+                        'Tap to change your unlock goal.'
+                    : 'Tap any section to change your daily or per-unlock goals.',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               const SizedBox(height: 16),
-              _DailyGoalSection(goal: dailyGoal),
-              const SizedBox(height: 12),
+              if (mode == StudyMode.cardCount) ...[
+                _DailyGoalSection(goal: dailyGoal),
+                const SizedBox(height: 12),
+              ],
               _UnlockGoalSection(goal: unlockGoal),
               const SizedBox(height: 12),
               _BlockedAppsSection(
@@ -125,7 +146,7 @@ class TodayScreen extends ConsumerWidget {
               _StudyDecksSection(
                 decksAsync: decksAsync,
                 scopeAsync: scopeAsync,
-                due: due,
+                due: studyable,
               ),
               const SizedBox(height: 28),
               Text('Today', style: Theme.of(context).textTheme.titleLarge),
@@ -162,22 +183,32 @@ class TodayScreen extends ConsumerWidget {
 
 class _StudyHero extends ConsumerStatefulWidget {
   final double progress;
-  final bool dailyComplete;
+  final bool goalComplete;
+  final StudyMode mode;
   final int reviewed;
   final int dailyGoal;
   final int dailyRemaining;
   final int unlockGoal;
-  final int due;
+  final int learnCount;
+  final int reviewCount;
+  final int newCount;
+  final int obligation;
+  final int studyable;
   final bool hasDecksSelected;
 
   const _StudyHero({
     required this.progress,
-    required this.dailyComplete,
+    required this.goalComplete,
+    required this.mode,
     required this.reviewed,
     required this.dailyGoal,
     required this.dailyRemaining,
     required this.unlockGoal,
-    required this.due,
+    required this.learnCount,
+    required this.reviewCount,
+    required this.newCount,
+    required this.obligation,
+    required this.studyable,
     required this.hasDecksSelected,
   });
 
@@ -211,7 +242,19 @@ class _StudyHeroState extends ConsumerState<_StudyHero> {
     final session = ref.watch(delegatedSessionProgressProvider);
     final hasSession = session != null;
     final sessionReviewed = session?.completed ?? 0;
-    final sessionGoal = session?.target ?? widget.dailyRemaining.clamp(1, widget.dailyGoal);
+    final dueMode = widget.mode == StudyMode.dueCards;
+    final sessionGoalFallback = dueMode
+        ? (widget.obligation > 0
+            ? (widget.obligation < widget.unlockGoal
+                ? widget.obligation
+                : widget.unlockGoal)
+            : (widget.newCount > 0
+                ? (widget.newCount < widget.unlockGoal
+                    ? widget.newCount
+                    : widget.unlockGoal)
+                : widget.unlockGoal))
+        : widget.dailyRemaining.clamp(1, widget.dailyGoal);
+    final sessionGoal = session?.target ?? sessionGoalFallback;
     final sessionRemaining =
         (sessionGoal - sessionReviewed).clamp(0, sessionGoal);
     final sessionProgress = sessionGoal > 0
@@ -222,15 +265,29 @@ class _StudyHeroState extends ConsumerState<_StudyHero> {
 
     final displayProgress = hasSession ? sessionProgress : widget.progress;
     final displayComplete =
-        hasSession ? sessionComplete : widget.dailyComplete;
+        hasSession ? sessionComplete : widget.goalComplete;
     final displayReviewed =
         hasSession ? sessionReviewed : widget.reviewed;
     final displayGoal =
         hasSession ? sessionGoal : widget.dailyGoal;
-    final displayRemaining =
-        hasSession ? sessionRemaining : widget.dailyRemaining;
-    final hasCards = widget.due > 0;
+    final hasCards = widget.studyable > 0;
     final canStartStudy = hasCards && widget.hasDecksSelected;
+
+    final queueLine =
+        '${widget.learnCount} learning · ${widget.reviewCount} to review';
+    final newLine = widget.newCount > 0 ? '${widget.newCount} new' : null;
+
+    final subtitle = hasSession
+        ? (displayComplete
+            ? 'Session complete!'
+            : '$sessionRemaining cards left in this session')
+        : dueMode
+            ? (displayComplete
+                ? 'Learning & reviews done · ${widget.reviewed} studied'
+                : '$queueLine · clear to unlock')
+            : (displayComplete
+                ? 'Unlocked until 3am · $displayReviewed studied'
+                : '${widget.dailyRemaining} cards until freedom today');
 
     return BrandCard(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
@@ -247,7 +304,9 @@ class _StudyHeroState extends ConsumerState<_StudyHero> {
                 Text(
                   displayComplete
                       ? '100%'
-                      : '${(displayProgress * 100).round()}%',
+                      : dueMode && !hasSession
+                          ? '${widget.obligation}'
+                          : '${(displayProgress * 100).round()}%',
                   style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                         fontWeight: FontWeight.w700,
                         color: displayComplete
@@ -257,12 +316,22 @@ class _StudyHeroState extends ConsumerState<_StudyHero> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  displayComplete && displayReviewed > displayGoal
-                      ? '$displayReviewed'
-                      : '$displayReviewed / $displayGoal',
+                  dueMode && !hasSession && !displayComplete
+                      ? 'left'
+                      : !dueMode &&
+                              displayComplete &&
+                              displayReviewed > displayGoal
+                          ? '$displayReviewed'
+                          : hasSession
+                              ? '$displayReviewed / $displayGoal'
+                              : dueMode
+                                  ? '${widget.reviewed} studied'
+                                  : '$displayReviewed / $displayGoal',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
-                if (displayComplete && displayReviewed > displayGoal)
+                if (!dueMode &&
+                    displayComplete &&
+                    displayReviewed > displayGoal)
                   Text(
                     'goal $displayGoal',
                     style: Theme.of(context).textTheme.labelSmall,
@@ -272,15 +341,20 @@ class _StudyHeroState extends ConsumerState<_StudyHero> {
           ),
           const SizedBox(height: 16),
           Text(
-            hasSession
-                ? (displayComplete
-                    ? 'Session complete!'
-                    : '$displayRemaining cards left in this session')
-                : (displayComplete
-                    ? 'Unlocked until 3am · $displayReviewed studied'
-                    : '$displayRemaining cards until freedom today'),
+            subtitle,
+            textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.titleMedium,
           ),
+          if (dueMode && !hasSession) ...[
+            const SizedBox(height: 6),
+            Text(
+              newLine != null
+                  ? '$newLine (optional · does not block unlock)'
+                  : 'New cards are optional and do not block unlock.',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
           if (!hasSession && !displayComplete) ...[
             const SizedBox(height: 6),
             Text(
@@ -324,7 +398,9 @@ class _StudyHeroState extends ConsumerState<_StudyHero> {
                           : !widget.hasDecksSelected
                               ? 'Select decks to study'
                               : hasCards
-                                  ? 'Start Studying · ${widget.due} due'
+                                  ? (dueMode
+                                      ? 'Start Studying · ${widget.obligation} left'
+                                      : 'Start Studying · ${widget.studyable} due')
                                   : 'Nothing due right now',
                 ),
               ],

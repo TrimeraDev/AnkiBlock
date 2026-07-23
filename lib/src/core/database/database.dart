@@ -36,6 +36,17 @@ class BlockRules extends Table {
   BoolColumn get bypassEnabled => boolean().withDefault(const Constant(true))();
   IntColumn get bypassDailyCap => integer().withDefault(const Constant(2))();
   IntColumn get bypassSeconds => integer().withDefault(const Constant(60))();
+  /// `dueCards` | `cardCount`. Fresh installs use dueCards; upgrades keep cardCount.
+  TextColumn get studyMode =>
+      text().withDefault(const Constant('cardCount'))();
+  /// `off` | `soft` | `strict`.
+  TextColumn get settingsProtection =>
+      text().withDefault(const Constant('off'))();
+  IntColumn get settingsUnlockMinutes =>
+      integer().withDefault(const Constant(10))();
+  /// `selectedApps` | `lockdown`.
+  TextColumn get blockingMode =>
+      text().withDefault(const Constant('selectedApps'))();
   BoolColumn get isEnabled => boolean().withDefault(const Constant(true))();
   IntColumn get updatedAt =>
       integer().withDefault(Constant(DateTime.now().millisecondsSinceEpoch))();
@@ -89,18 +100,43 @@ class AppDatabase extends _$AppDatabase {
   }
 
   @override
-  int get schemaVersion => 7;
+  int get schemaVersion => 9;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
         onCreate: (m) async {
           await m.createAll();
+          // Fresh installs: Anki-queue study mode + phone lockdown.
           await into(blockRules).insert(
-            BlockRulesCompanion.insert(id: const Value(1)),
+            BlockRulesCompanion.insert(
+              id: const Value(1),
+              studyMode: const Value('dueCards'),
+              blockingMode: const Value('lockdown'),
+            ),
             mode: InsertMode.insertOrIgnore,
           );
         },
         onUpgrade: (m, from, to) async {
+          if (from < 9) {
+            await m.database.customStatement(
+              "ALTER TABLE block_rules "
+              "ADD COLUMN blocking_mode TEXT NOT NULL DEFAULT 'selectedApps'",
+            );
+          }
+          if (from < 8) {
+            await m.database.customStatement(
+              "ALTER TABLE block_rules "
+              "ADD COLUMN study_mode TEXT NOT NULL DEFAULT 'cardCount'",
+            );
+            await m.database.customStatement(
+              "ALTER TABLE block_rules "
+              "ADD COLUMN settings_protection TEXT NOT NULL DEFAULT 'off'",
+            );
+            await m.database.customStatement(
+              'ALTER TABLE block_rules '
+              'ADD COLUMN settings_unlock_minutes INTEGER NOT NULL DEFAULT 10',
+            );
+          }
           if (from < 7) {
             await m.database.customStatement(
               'ALTER TABLE block_rules '

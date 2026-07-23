@@ -10,6 +10,7 @@ import '../../core/services/ankidroid_service.dart';
 import '../../core/services/study_launcher.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/bypass.dart';
+import '../../core/utils/blocking_goal.dart';
 import '../../core/utils/deck_scope_format.dart';
 import '../../core/utils/study_day.dart';
 import '../../core/widgets/brand_widgets.dart';
@@ -70,12 +71,19 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
   Future<void> _maybeAutoLaunch() async {
     if (_autoLaunched) return;
     final rule = await ref.read(blockRuleProvider.future);
+    final mode = StudyMode.fromStorage(rule?.studyMode);
     final dailyGoal = rule?.dailyCardsGoal ?? 30;
     final today = studyDayKey();
     final reviewed =
         (await ref.read(databaseProvider).getDailyStat(today))?.cardsReviewed ??
             0;
-    if (!isDailyGoalComplete(dailyGoal: dailyGoal, cardsReviewed: reviewed)) {
+    final due = (await ref.read(studyCountsProvider.future)).obligationDue;
+    if (!isBlockingGoalComplete(
+      mode: mode,
+      dailyCardsGoal: dailyGoal,
+      cardsReviewed: reviewed,
+      obligationDue: due,
+    )) {
       return;
     }
     _autoLaunched = true;
@@ -146,8 +154,10 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
 
     final unlockGoal = ruleAsync.valueOrNull?.cardsRequired ?? 10;
     final dailyGoal = ruleAsync.valueOrNull?.dailyCardsGoal ?? 30;
+    final mode = StudyMode.fromStorage(ruleAsync.valueOrNull?.studyMode);
     final counts = countsAsync.valueOrNull ?? AnkiDroidCounts.zero;
     final ankiReady = ankiStatusAsync.valueOrNull?.isReady ?? false;
+    final obligation = counts.obligationDue;
     final available = counts.studyable;
     final decks = decksAsync.valueOrNull ?? const [];
     final scope = scopeAsync.valueOrNull;
@@ -155,13 +165,20 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
         decks.isNotEmpty &&
         hasDecksInScope(scope, decks);
     final reviewed = dailyStatsAsync.valueOrNull?.cardsReviewed ?? 0;
-    final dailyComplete =
-        isDailyGoalComplete(dailyGoal: dailyGoal, cardsReviewed: reviewed);
+    final goalComplete = isBlockingGoalComplete(
+      mode: mode,
+      dailyCardsGoal: dailyGoal,
+      cardsReviewed: reviewed,
+      obligationDue: obligation,
+    );
     final dailyRemaining = (dailyGoal - reviewed).clamp(0, dailyGoal);
-    final progress = dailyGoal > 0
-        ? (reviewed / dailyGoal).clamp(0.0, 1.0)
-        : 0.0;
-    final remaining = dailyComplete ? 0 : unlockGoal;
+    final progress = switch (mode) {
+      StudyMode.dueCards => obligation <= 0 ? 1.0 : 0.0,
+      StudyMode.cardCount => dailyGoal > 0
+          ? (reviewed / dailyGoal).clamp(0.0, 1.0)
+          : 0.0,
+    };
+    final remaining = goalComplete ? 0 : unlockGoal;
 
     final rule = ruleAsync.valueOrNull;
     final bypassEnabled = rule?.bypassEnabled ?? true;
@@ -173,7 +190,7 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
       bypassDailyCap: bypassCap,
       bypassesUsed: bypassesUsed,
     );
-    final showBypass = !dailyComplete &&
+    final showBypass = !goalComplete &&
         bypassEnabled &&
         canUseBypass(
           bypassEnabled: bypassEnabled,
@@ -182,6 +199,36 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
         );
 
     final canStudy = ankiReady && available > 0 && hasDecksSelected;
+
+    final headlineBefore = goalComplete
+        ? (mode == StudyMode.dueCards
+            ? 'Learning & reviews done. '
+            : 'Daily goal done. ')
+        : 'Study first. ';
+    final headlineAccent = goalComplete ? 'Enjoy.' : 'Unlock later.';
+    final statusLine = goalComplete
+        ? (mode == StudyMode.dueCards
+            ? 'Unlocked · queue cleared'
+            : 'Unlocked until 3am')
+        : remaining > 0
+            ? '$remaining cards to unlock'
+            : 'Goal complete!';
+    final queueSummary =
+        '${counts.learnCount} learning · ${counts.reviewCount} to review'
+        '${counts.newCount > 0 ? ' · ${counts.newCount} new' : ''}';
+    final statusDetail = goalComplete
+        ? (mode == StudyMode.dueCards
+            ? 'You finished learning & reviews. All blocked apps are open. '
+                '${counts.newCount > 0 ? '${counts.newCount} new left (optional).' : ''}'
+            : 'You finished your daily goal. All blocked apps '
+                'are open for the rest of the study day.')
+        : mode == StudyMode.dueCards
+            ? 'Study $unlockGoal cards to open ${widget.appName}. '
+                'Finish learning & reviews to unlock everything. '
+                '($queueSummary)'
+            : 'Study $unlockGoal cards from your selected decks '
+                'to open ${widget.appName}. '
+                '$dailyRemaining more today unlocks everything.';
 
     return PopScope(
       canPop: false,
@@ -197,7 +244,7 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
                 Center(
                   child: GradientProgressRing(
                     progress: progress,
-                    complete: dailyComplete,
+                    complete: goalComplete,
                     size: 120,
                     strokeWidth: 8,
                     child: Image.asset(
@@ -217,8 +264,8 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
                 ),
                 const SizedBox(height: 8),
                 AccentHeadline(
-                  before: dailyComplete ? 'Daily goal done. ' : 'Study first. ',
-                  accent: dailyComplete ? 'Enjoy.' : 'Unlock later.',
+                  before: headlineBefore,
+                  accent: headlineAccent,
                 ),
                 const SizedBox(height: 10),
                 StreakBanner(streakAsync: streakAsync, center: true),
@@ -248,7 +295,7 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Icon(
-                            dailyComplete
+                            goalComplete
                                 ? Icons.lock_open_outlined
                                 : Icons.lock_outline,
                             size: 18,
@@ -256,23 +303,14 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            dailyComplete
-                                ? 'Unlocked until 3am'
-                                : remaining > 0
-                                    ? '$remaining cards to unlock'
-                                    : 'Goal complete!',
+                            statusLine,
                             style: Theme.of(context).textTheme.titleMedium,
                           ),
                         ],
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        dailyComplete
-                            ? 'You finished your daily goal. All blocked apps '
-                                'are open for the rest of the study day.'
-                            : 'Study $unlockGoal cards from your selected decks '
-                                'to open ${widget.appName}. '
-                                '$dailyRemaining more today unlocks everything.',
+                        statusDetail,
                         textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
@@ -310,7 +348,7 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
                   ),
                 ],
                 const SizedBox(height: 28),
-                if (!dailyComplete)
+                if (!goalComplete)
                   GradientButton(
                     onPressed: !ankiReady
                         ? () => context.push('/ankidroid')
@@ -357,7 +395,7 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
                         _useEmergencyBypass(bypassSeconds: bypassSeconds),
                   ),
                 ],
-                if (!dailyComplete && bypassEnabled && bypassesLeft == 0) ...[
+                if (!goalComplete && bypassEnabled && bypassesLeft == 0) ...[
                   const SizedBox(height: 12),
                   Text(
                     'No emergency bypasses left today. Study to unlock.',
@@ -367,7 +405,7 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
                         ),
                   ),
                 ],
-                if (dailyComplete) ...[
+                if (goalComplete) ...[
                   GradientButton(
                     onPressed: () async {
                       final ok = await ref

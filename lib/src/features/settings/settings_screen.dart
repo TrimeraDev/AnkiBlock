@@ -6,9 +6,12 @@ import 'package:go_router/go_router.dart';
 import '../../core/database/database.dart';
 import '../../core/constants/support_links.dart';
 import '../../core/di/providers.dart';
+import '../../core/services/settings_protection_service.dart';
 import '../../core/setup/setup_actions.dart';
 import '../../core/support/support_actions.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/blocking_goal.dart';
+
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
@@ -25,14 +28,21 @@ class SettingsScreen extends ConsumerWidget {
         ),
       ),
       body: ruleAsync.when(
-        data: (rule) => _buildList(context, ref, rule),
+        data: (rule) => _SettingsBody(rule: rule),
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Error: $e')),
       ),
     );
   }
+}
 
-  Widget _buildList(BuildContext context, WidgetRef ref, BlockRule? rule) {
+class _SettingsBody extends ConsumerWidget {
+  final BlockRule? rule;
+
+  const _SettingsBody({required this.rule});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
     final cards = rule?.cardsRequired ?? 10;
     final daily = rule?.dailyCardsGoal ?? 30;
     final minutes = rule?.unlockDurationMinutes ?? 10;
@@ -40,6 +50,10 @@ class SettingsScreen extends ConsumerWidget {
     final bypassCap = rule?.bypassDailyCap ?? 2;
     final bypassSeconds = rule?.bypassSeconds ?? 60;
     final enabled = rule?.isEnabled ?? true;
+    final mode = StudyMode.fromStorage(rule?.studyMode);
+    final protection =
+        SettingsProtection.fromStorage(rule?.settingsProtection);
+    final settingsUnlockMinutes = rule?.settingsUnlockMinutes ?? 10;
 
     return ListView(
       children: [
@@ -74,25 +88,6 @@ class SettingsScreen extends ConsumerWidget {
         const Divider(),
         const _SectionHeader(label: 'Study goals'),
         ListTile(
-          leading: const Icon(Icons.calendar_today_outlined),
-          title: const Text('Daily goal'),
-          subtitle: Text('$daily cards · unlocks all apps until 3am'),
-          onTap: () async {
-            final result = await _pickInt(
-              context,
-              title: 'Daily goal',
-              initial: daily,
-              min: 5,
-              max: 200,
-              suffix: 'cards',
-            );
-            if (result != null) {
-              _save(ref, dailyCardsGoal: Value(result));
-              await syncDailyGoalToNative(ref);
-            }
-          },
-        ),
-        ListTile(
           leading: const Icon(Icons.tune),
           title: const Text('Unlock goal'),
           subtitle: Text('$cards cards per blocked app'),
@@ -105,7 +100,17 @@ class SettingsScreen extends ConsumerWidget {
               max: 50,
               suffix: 'cards',
             );
-            if (result != null) _save(ref, cardsRequired: Value(result));
+            if (result == null) return;
+            if (isWeakeningUnlockGoal(current: cards, proposed: result)) {
+              final ok = await ref
+                  .read(settingsProtectionServiceProvider)
+                  .requestProtectedEdit(
+                    context,
+                    kind: ProtectedEditKind.lowerUnlockGoal,
+                  );
+              if (!ok) return;
+            }
+            await _save(ref, cardsRequired: Value(result));
           },
         ),
         SwitchListTile(
@@ -114,7 +119,18 @@ class SettingsScreen extends ConsumerWidget {
           subtitle: const Text(
               'When off, blocked apps open without requiring a study session.'),
           value: enabled,
-          onChanged: (v) => _save(ref, isEnabled: Value(v)),
+          onChanged: (v) async {
+            if (!v) {
+              final ok = await ref
+                  .read(settingsProtectionServiceProvider)
+                  .requestProtectedEdit(
+                    context,
+                    kind: ProtectedEditKind.disableBlocking,
+                  );
+              if (!ok) return;
+            }
+            await _save(ref, isEnabled: Value(v));
+          },
         ),
         ListTile(
           leading: const Icon(Icons.timer_outlined),
@@ -136,6 +152,45 @@ class SettingsScreen extends ConsumerWidget {
           },
         ),
         const Divider(),
+        const _SectionHeader(label: 'Settings protection'),
+        ListTile(
+          leading: const Icon(Icons.lock_person_outlined),
+          title: const Text('Protection level'),
+          subtitle: Text(
+            '${protection.label} · weakening changes are harder while you '
+            'still have reviews to do',
+          ),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => _pickProtection(context, ref, protection),
+        ),
+        if (protection == SettingsProtection.strict)
+          ListTile(
+            leading: const Icon(Icons.hourglass_bottom_outlined),
+            title: const Text('Settings unlock window'),
+            subtitle: Text('$settingsUnlockMinutes minutes after friction'),
+            onTap: () async {
+              final result = await _pickInt(
+                context,
+                title: 'Unlock window',
+                initial: settingsUnlockMinutes,
+                min: 1,
+                max: 60,
+                suffix: 'minutes',
+              );
+              if (result != null) {
+                await updateSettingsProtection(ref, unlockMinutes: result);
+              }
+            },
+          ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Text(
+            'Stricter changes are always instant. Full settings access unlocks '
+            'once your study goal is complete.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+        const Divider(),
         const _SectionHeader(label: 'Emergency bypass'),
         SwitchListTile(
           secondary: const Icon(Icons.emergency_outlined),
@@ -145,6 +200,16 @@ class SettingsScreen extends ConsumerWidget {
           ),
           value: bypassEnabled,
           onChanged: (v) async {
+            // Enabling bypass is loosening; disabling is tightening.
+            if (v) {
+              final ok = await ref
+                  .read(settingsProtectionServiceProvider)
+                  .requestProtectedEdit(
+                    context,
+                    kind: ProtectedEditKind.loosenBypass,
+                  );
+              if (!ok) return;
+            }
             await _save(ref, bypassEnabled: Value(v));
           },
         ),
@@ -163,9 +228,18 @@ class SettingsScreen extends ConsumerWidget {
                     max: 10,
                     suffix: 'uses',
                   );
-                  if (result != null) {
-                    await _save(ref, bypassDailyCap: Value(result));
+                  if (result == null) return;
+                  if (isWeakeningBypassCap(
+                      current: bypassCap, proposed: result)) {
+                    final ok = await ref
+                        .read(settingsProtectionServiceProvider)
+                        .requestProtectedEdit(
+                          context,
+                          kind: ProtectedEditKind.loosenBypass,
+                        );
+                    if (!ok) return;
                   }
+                  await _save(ref, bypassDailyCap: Value(result));
                 }
               : null,
         ),
@@ -184,15 +258,67 @@ class SettingsScreen extends ConsumerWidget {
                     max: 300,
                     suffix: 'seconds',
                   );
-                  if (result != null) {
-                    await _save(
-                      ref,
-                      bypassSeconds: Value(result),
-                    );
-                    await syncBlockRuleToNative(ref);
+                  if (result == null) return;
+                  if (isWeakeningBypassSeconds(
+                      current: bypassSeconds, proposed: result)) {
+                    final ok = await ref
+                        .read(settingsProtectionServiceProvider)
+                        .requestProtectedEdit(
+                          context,
+                          kind: ProtectedEditKind.loosenBypass,
+                        );
+                    if (!ok) return;
                   }
+                  await _save(ref, bypassSeconds: Value(result));
+                  await syncBlockRuleToNative(ref);
                 }
               : null,
+        ),
+        const Divider(),
+        const _SectionHeader(label: 'Advanced'),
+        ListTile(
+          leading: const Icon(Icons.flag_outlined),
+          title: const Text('Study mode'),
+          subtitle: Text(mode.subtitle),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => _pickStudyMode(context, ref, mode),
+        ),
+        if (mode == StudyMode.cardCount)
+          ListTile(
+            leading: const Icon(Icons.calendar_today_outlined),
+            title: const Text('Daily goal'),
+            subtitle: Text('$daily cards · unlocks all apps until 3am'),
+            onTap: () async {
+              final result = await _pickInt(
+                context,
+                title: 'Daily goal',
+                initial: daily,
+                min: 5,
+                max: 200,
+                suffix: 'cards',
+              );
+              if (result == null) return;
+              if (isWeakeningDailyGoal(current: daily, proposed: result)) {
+                final ok = await ref
+                    .read(settingsProtectionServiceProvider)
+                    .requestProtectedEdit(
+                      context,
+                      kind: ProtectedEditKind.lowerDailyGoal,
+                    );
+                if (!ok) return;
+              }
+              await _save(ref, dailyCardsGoal: Value(result));
+              await syncDailyGoalToNative(ref);
+            },
+          ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Text(
+            'Card count ignores AnkiDroid\'s queue and uses a fixed daily '
+            'number instead. Anki queue (default) unlocks when learning & '
+            'reviews are done.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
         ),
         const Divider(),
         const _SectionHeader(label: 'Support'),
@@ -286,6 +412,109 @@ class SettingsScreen extends ConsumerWidget {
         ),
       ],
     );
+  }
+
+  Future<void> _pickStudyMode(
+    BuildContext context,
+    WidgetRef ref,
+    StudyMode current,
+  ) async {
+    final due =
+        ref.read(studyCountsProvider).valueOrNull?.obligationDue ?? 0;
+    final chosen = await showModalBottomSheet<StudyMode>(
+      context: context,
+      backgroundColor: AppTheme.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: const Text('Anki queue'),
+              subtitle: const Text(
+                'Recommended · unlock when learning & reviews are done',
+              ),
+              trailing: current == StudyMode.dueCards
+                  ? const Icon(Icons.check, color: AppTheme.accent)
+                  : null,
+              onTap: () => Navigator.pop(ctx, StudyMode.dueCards),
+            ),
+            ListTile(
+              title: const Text('Card count'),
+              subtitle: const Text('Unlock after a fixed daily card goal'),
+              trailing: current == StudyMode.cardCount
+                  ? const Icon(Icons.check, color: AppTheme.accent)
+                  : null,
+              onTap: () => Navigator.pop(ctx, StudyMode.cardCount),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (chosen == null || chosen == current) return;
+    if (isWeakerStudyMode(
+      current: current,
+      proposed: chosen,
+      obligationDue: due,
+    )) {
+      final ok = await ref
+          .read(settingsProtectionServiceProvider)
+          .requestProtectedEdit(
+            context,
+            kind: ProtectedEditKind.switchToWeakerStudyMode,
+          );
+      if (!ok) return;
+    }
+    await updateStudyMode(ref, chosen.storageValue);
+  }
+
+  Future<void> _pickProtection(
+    BuildContext context,
+    WidgetRef ref,
+    SettingsProtection current,
+  ) async {
+    final chosen = await showModalBottomSheet<SettingsProtection>(
+      context: context,
+      backgroundColor: AppTheme.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final level in SettingsProtection.values)
+              ListTile(
+                title: Text(level.label),
+                subtitle: Text(switch (level) {
+                  SettingsProtection.off => 'No extra friction',
+                  SettingsProtection.soft =>
+                    '15-second pause before weakening changes',
+                  SettingsProtection.strict =>
+                    'Pause, or study to unlock settings temporarily',
+                }),
+                trailing: current == level
+                    ? const Icon(Icons.check, color: AppTheme.accent)
+                    : null,
+                onTap: () => Navigator.pop(ctx, level),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (chosen == null || chosen == current) return;
+    if (isWeakeningProtection(current: current, proposed: chosen)) {
+      final ok = await ref
+          .read(settingsProtectionServiceProvider)
+          .requestProtectedEdit(
+            context,
+            kind: ProtectedEditKind.lowerProtection,
+          );
+      if (!ok) return;
+    }
+    await updateSettingsProtection(ref, protection: chosen.storageValue);
   }
 
   Future<void> _save(

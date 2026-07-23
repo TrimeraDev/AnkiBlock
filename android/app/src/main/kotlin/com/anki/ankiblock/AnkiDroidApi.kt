@@ -254,15 +254,25 @@ class AnkiDroidApi(private val context: Context) {
 
     /** learn + review + new counts for one deck (matches Flutter's totalDue). */
     fun deckDueTotal(deckId: Long): Int {
-        if (!hasPermission()) return 0
+        val (learn, review, newC) = deckCounts(deckId) ?: return 0
+        return learn + review + newC
+    }
+
+    /** learn + review only — Anki's daily obligation (excludes new). */
+    fun deckObligationTotal(deckId: Long): Int {
+        val (learn, review, _) = deckCounts(deckId) ?: return 0
+        return learn + review
+    }
+
+    private fun deckCounts(deckId: Long): Triple<Int, Int, Int>? {
+        if (!hasPermission()) return null
         val deckUri = Uri.withAppendedPath(DECKS_URI, deckId.toString())
         val cr = context.contentResolver
         cr.query(deckUri, null, null, null, null)?.use { c ->
             if (c.moveToFirst()) {
                 val countsIdx = columnIndex(c, DECK_COUNT, "deck_counts")
                 val counts = if (countsIdx >= 0) c.getString(countsIdx) else null
-                val (learn, review, newC) = parseDeckCounts(counts)
-                return learn + review + newC
+                return parseDeckCounts(counts)
             }
         }
         for (deck in listDecks()) {
@@ -271,10 +281,10 @@ class AnkiDroidApi(private val context: Context) {
                 val learn = (deck["learnCount"] as? Number)?.toInt() ?: 0
                 val review = (deck["reviewCount"] as? Number)?.toInt() ?: 0
                 val newC = (deck["newCount"] as? Number)?.toInt() ?: 0
-                return learn + review + newC
+                return Triple(learn, review, newC)
             }
         }
-        return 0
+        return null
     }
 
     fun parseCardKey(key: String): Pair<Long, Int>? {

@@ -3,8 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../di/providers.dart';
 import '../services/ankidroid_service.dart';
+import '../services/settings_protection_service.dart';
 import '../services/study_scope_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/blocking_goal.dart';
 import '../utils/deck_scope_format.dart';
 
 enum _DeckSort { dueDesc, nameAsc }
@@ -437,6 +439,13 @@ class _BulkActionsHeader extends ConsumerWidget {
               ),
               TextButton(
                 onPressed: () async {
+                  final ok = await ref
+                      .read(settingsProtectionServiceProvider)
+                      .requestProtectedEdit(
+                        context,
+                        kind: ProtectedEditKind.shrinkDeckScope,
+                      );
+                  if (!ok) return;
                   await svc.disableAll(decks.map((d) => d.id));
                   await onChanged();
                 },
@@ -449,6 +458,23 @@ class _BulkActionsHeader extends ConsumerWidget {
                       .where((d) => d.totalDue == 0)
                       .map((d) => d.id)
                       .toSet();
+                  // Shrinking when disabling currently-enabled decks.
+                  final scope = await ref.read(studyScopeProvider.future);
+                  final currentlyEnabled = decks
+                      .where((d) => !scope.disabledDeckIds.contains(d.id))
+                      .map((d) => d.id)
+                      .toSet();
+                  final willDisable =
+                      currentlyEnabled.intersection(disabled);
+                  if (willDisable.isNotEmpty) {
+                    final ok = await ref
+                        .read(settingsProtectionServiceProvider)
+                        .requestProtectedEdit(
+                          context,
+                          kind: ProtectedEditKind.shrinkDeckScope,
+                        );
+                    if (!ok) return;
+                  }
                   await svc.setDisabledDeckIds(disabled);
                   if (withDue.isEmpty) {
                     await svc.enableAll();
@@ -508,6 +534,15 @@ class _DeckPickerRow extends ConsumerWidget {
       ),
       value: enabled,
       onChanged: (v) async {
+        if (!v) {
+          final ok = await ref
+              .read(settingsProtectionServiceProvider)
+              .requestProtectedEdit(
+                context,
+                kind: ProtectedEditKind.shrinkDeckScope,
+              );
+          if (!ok) return;
+        }
         await ref.read(studyScopeServiceProvider).setDeckEnabled(deck.id, v);
         await onChanged();
       },

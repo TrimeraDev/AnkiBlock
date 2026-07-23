@@ -1,9 +1,12 @@
 import 'package:drift/drift.dart' show Value;
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../database/database.dart';
 import '../di/providers.dart';
 import '../services/apps_service.dart';
+import '../services/settings_protection_service.dart';
+import '../utils/blocking_goal.dart';
 import '../utils/study_day.dart';
 
 Future<void> updateCardsRequired(WidgetRef ref, int cards) async {
@@ -27,12 +30,53 @@ Future<void> updateDailyCardsGoal(WidgetRef ref, int cards) async {
   await syncDailyGoalToNative(ref);
 }
 
+Future<void> updateStudyMode(WidgetRef ref, String mode) async {
+  final db = ref.read(databaseProvider);
+  await db.updateBlockRule(BlockRulesCompanion(
+    id: const Value(1),
+    studyMode: Value(mode),
+    updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
+  ));
+  ref.invalidate(blockRuleProvider);
+  await syncBlockRuleToNative(ref);
+}
+
+Future<void> updateBlockingMode(WidgetRef ref, String mode) async {
+  final db = ref.read(databaseProvider);
+  await db.updateBlockRule(BlockRulesCompanion(
+    id: const Value(1),
+    blockingMode: Value(mode),
+    updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
+  ));
+  ref.invalidate(blockRuleProvider);
+  await syncBlockRuleToNative(ref);
+}
+
+Future<void> updateSettingsProtection(
+  WidgetRef ref, {
+  String? protection,
+  int? unlockMinutes,
+}) async {
+  final db = ref.read(databaseProvider);
+  await db.updateBlockRule(BlockRulesCompanion(
+    id: const Value(1),
+    settingsProtection:
+        protection != null ? Value(protection) : const Value.absent(),
+    settingsUnlockMinutes:
+        unlockMinutes != null ? Value(unlockMinutes) : const Value.absent(),
+    updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
+  ));
+  ref.invalidate(blockRuleProvider);
+}
+
 Future<void> syncBlockRuleToNative(WidgetRef ref) async {
   final rule = await ref.read(blockRuleProvider.future);
   await ref.read(appsServiceProvider).syncBlockRuleSettings(
         unlockDurationMinutes: rule?.unlockDurationMinutes ?? 10,
         bypassSeconds: rule?.bypassSeconds ?? 60,
         isEnabled: rule?.isEnabled ?? true,
+        studyMode: rule?.studyMode ?? 'cardCount',
+        blockingMode: rule?.blockingMode ?? 'selectedApps',
       );
 }
 
@@ -80,10 +124,12 @@ Future<void> mergeDailyFromNative(WidgetRef ref) async {
 }
 
 Future<void> ensureAppMonitorRunning(WidgetRef ref) async {
+  final rule = await ref.read(blockRuleProvider.future);
+  final mode = BlockingMode.fromStorage(rule?.blockingMode);
   final blocked =
       await ref.read(databaseProvider).watchActiveBlockedApps().first;
   final svc = ref.read(appsServiceProvider);
-  if (blocked.isNotEmpty) {
+  if (mode == BlockingMode.lockdown || blocked.isNotEmpty) {
     await svc.startAppMonitor();
   } else {
     await svc.stopAppMonitor();
@@ -94,7 +140,17 @@ Future<void> toggleAppBlocked(
   WidgetRef ref, {
   required InstalledApp app,
   required bool blocked,
+  BuildContext? context,
 }) async {
+  if (!blocked && context != null && context.mounted) {
+    final ok = await ref
+        .read(settingsProtectionServiceProvider)
+        .requestProtectedEdit(
+          context,
+          kind: ProtectedEditKind.unblockApp,
+        );
+    if (!ok) return;
+  }
   final db = ref.read(databaseProvider);
   final existing = await db.getBlockedApp(app.packageName);
   if (existing == null) {

@@ -10,6 +10,7 @@ import '../services/study_scope_service.dart';
 import '../services/support_prompt_service.dart';
 import '../utils/study_day.dart';
 import '../utils/study_progress.dart';
+import '../utils/blocking_goal.dart';
 
 // Database -------------------------------------------------------------------
 
@@ -23,12 +24,20 @@ final permissionServiceProvider = Provider<PermissionService>((ref) {
   return PermissionService();
 });
 
+/// Usage access + overlay + monitor/battery state (Android). Powers the global
+/// protection banner and permissions screen.
+final protectionStatusProvider =
+    FutureProvider<ProtectionStatus>((ref) async {
+  final perm = ref.watch(permissionServiceProvider);
+  return perm.getProtectionStatus();
+});
+
 /// Usage access + "display over other apps" (Android). Powers the global
 /// "missing permissions" banner.
 final blockingPermissionsProvider =
     FutureProvider<({bool usage, bool overlay})>((ref) async {
-  final perm = ref.watch(permissionServiceProvider);
-  return perm.getBlockingPermissions();
+  final status = await ref.watch(protectionStatusProvider.future);
+  return (usage: status.usage, overlay: status.overlay);
 });
 
 final appsServiceProvider = Provider<AppsService>((ref) {
@@ -154,6 +163,23 @@ final activeBlockedAppsProvider = StreamProvider<List<BlockedApp>>((ref) {
 final blockRuleProvider = StreamProvider<BlockRule?>((ref) {
   final db = ref.watch(databaseProvider);
   return db.watchBlockRule();
+});
+
+/// Whether the active study-mode goal is complete (due cleared or card count met).
+final blockingGoalCompleteProvider = Provider<bool>((ref) {
+  final rule = ref.watch(blockRuleProvider).valueOrNull;
+  final mode = StudyMode.fromStorage(rule?.studyMode);
+  final dailyGoal = rule?.dailyCardsGoal ?? 30;
+  final reviewed =
+      ref.watch(dailyStatsProvider(studyDayKey())).valueOrNull?.cardsReviewed ??
+          0;
+  final due = ref.watch(studyCountsProvider).valueOrNull?.obligationDue ?? 0;
+  return isBlockingGoalComplete(
+    mode: mode,
+    dailyCardsGoal: dailyGoal,
+    cardsReviewed: reviewed,
+    obligationDue: due,
+  );
 });
 
 /// Live daily stats for a given YYYY-MM-DD date.

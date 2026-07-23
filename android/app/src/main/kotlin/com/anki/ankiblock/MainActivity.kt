@@ -1,6 +1,5 @@
 package com.anki.ankiblock
 
-import android.app.AppOpsManager
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
@@ -14,7 +13,6 @@ import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Process
 import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -113,18 +111,13 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "startAppMonitor" -> {
-                    val intent = Intent(this, AppMonitorService::class.java)
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        startForegroundService(intent)
-                    } else {
-                        startService(intent)
-                    }
-                    result.success(true)
+                    result.success(MonitorBootstrap.startMonitorIfNeeded(this))
                 }
                 "stopAppMonitor" -> {
                     val intent = Intent(this, AppMonitorService::class.java)
                     intent.action = AppMonitorService.ACTION_STOP
                     stopService(intent)
+                    MonitorWatchdog.cancel(this)
                     result.success(true)
                 }
                 "consumePendingGate" -> {
@@ -153,11 +146,16 @@ class MainActivity : FlutterActivity() {
                         call.argument<Int>("unlockDurationMinutes") ?: 10
                     val bypassSeconds = call.argument<Int>("bypassSeconds") ?: 60
                     val isEnabled = call.argument<Boolean>("isEnabled") ?: true
+                    val studyMode = call.argument<String>("studyMode") ?: "cardCount"
+                    val blockingMode =
+                        call.argument<String>("blockingMode") ?: "selectedApps"
                     AppMonitorService.setBlockRuleSettings(
                         this,
                         unlockDurationMinutes,
                         bypassSeconds,
                         isEnabled,
+                        studyMode,
+                        blockingMode,
                     )
                     result.success(true)
                 }
@@ -209,6 +207,7 @@ class MainActivity : FlutterActivity() {
                     } else {
                         startService(monitorIntent)
                     }
+                    MonitorWatchdog.schedule(this)
                     result.success(true)
                 }
                 "cancelDelegatedSession" -> {
@@ -225,6 +224,24 @@ class MainActivity : FlutterActivity() {
                     } else {
                         result.success(false)
                     }
+                }
+                "getProtectionStatus" -> {
+                    result.success(ProtectionStatus.snapshot(this))
+                }
+                "isIgnoringBatteryOptimizations" -> {
+                    result.success(ProtectionStatus.isIgnoringBatteryOptimizations(this))
+                }
+                "requestBatteryOptimizationExemption" -> {
+                    result.success(
+                        ProtectionStatus.requestBatteryOptimizationExemption(this),
+                    )
+                }
+                "openBatterySettings" -> {
+                    ProtectionStatus.openBatterySettings(this)
+                    result.success(true)
+                }
+                "isAppMonitorRunning" -> {
+                    result.success(AppMonitorService.isRunning())
                 }
                 else -> result.notImplemented()
             }
@@ -471,22 +488,5 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun hasUsageAccess(): Boolean {
-        val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
-        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            appOps.unsafeCheckOpNoThrow(
-                AppOpsManager.OPSTR_GET_USAGE_STATS,
-                Process.myUid(),
-                packageName
-            )
-        } else {
-            @Suppress("DEPRECATION")
-            appOps.checkOpNoThrow(
-                AppOpsManager.OPSTR_GET_USAGE_STATS,
-                Process.myUid(),
-                packageName
-            )
-        }
-        return mode == AppOpsManager.MODE_ALLOWED
-    }
+    private fun hasUsageAccess(): Boolean = MonitorBootstrap.hasUsageAccess(this)
 }
