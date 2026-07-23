@@ -9,6 +9,7 @@ import '../theme/app_theme.dart';
 import '../utils/app_usage_format.dart';
 import '../utils/blocking_goal.dart';
 import 'brand_widgets.dart';
+import 'stepped_value_picker.dart';
 
 /// Study mode picker: due cards (default) vs fixed card count.
 class StudyModePanel extends ConsumerWidget {
@@ -154,11 +155,11 @@ class _ModeOption extends StatelessWidget {
   }
 }
 
-/// Preset chips + slider for cards required per unlock.
+/// Slider + text field for cards required per unlock.
 class UnlockGoalPanel extends ConsumerStatefulWidget {
   final int initial;
   final int min;
-  final int max;
+  final int sliderMax;
   final bool showTitle;
   final ValueChanged<int>? onChanged;
 
@@ -166,7 +167,7 @@ class UnlockGoalPanel extends ConsumerStatefulWidget {
     super.key,
     required this.initial,
     this.min = 5,
-    this.max = 50,
+    this.sliderMax = 50,
     this.showTitle = true,
     this.onChanged,
   });
@@ -176,42 +177,37 @@ class UnlockGoalPanel extends ConsumerStatefulWidget {
 }
 
 class _UnlockGoalPanelState extends ConsumerState<UnlockGoalPanel> {
-  static const _presets = [5, 10, 15, 20, 25, 30, 50];
   static const _step = 5;
 
   late int _value;
   late int _committed;
 
-  int _snap(int raw) {
-    final min = widget.min;
-    final max = widget.max;
-    final snapped = ((raw - min) / _step).round() * _step + min;
-    return snapped.clamp(min, max);
-  }
+  int _coerce(int raw) => raw < widget.min ? widget.min : raw;
 
   @override
   void initState() {
     super.initState();
-    _value = _snap(widget.initial);
-    _committed = widget.initial;
+    _value = _coerce(widget.initial);
+    _committed = _value;
   }
 
   @override
   void didUpdateWidget(UnlockGoalPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.initial != widget.initial) {
-      _value = _snap(widget.initial);
-      _committed = widget.initial;
+      _value = _coerce(widget.initial);
+      _committed = _value;
     }
   }
 
   void _set(int v) {
-    setState(() => _value = _snap(v));
-    widget.onChanged?.call(_value);
+    final next = _coerce(v);
+    setState(() => _value = next);
+    widget.onChanged?.call(next);
   }
 
   Future<void> _persist(int v) async {
-    final next = _snap(v);
+    final next = _coerce(v);
     if (isWeakeningUnlockGoal(current: _committed, proposed: next)) {
       final ok = await ref
           .read(settingsProtectionServiceProvider)
@@ -220,7 +216,7 @@ class _UnlockGoalPanelState extends ConsumerState<UnlockGoalPanel> {
             kind: ProtectedEditKind.lowerUnlockGoal,
           );
       if (!ok) {
-        setState(() => _value = _snap(_committed));
+        setState(() => _value = _committed);
         return;
       }
     }
@@ -244,53 +240,14 @@ class _UnlockGoalPanelState extends ConsumerState<UnlockGoalPanel> {
         ],
         BrandCard(
           color: AppTheme.cardElevated,
-          child: Column(
-            children: [
-              Text(
-                '$_value cards',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-              ),
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _presets.map((p) {
-                  if (p < widget.min || p > widget.max) {
-                    return const SizedBox.shrink();
-                  }
-                  final selected = _value == p;
-                  return ChoiceChip(
-                    label: Text('$p'),
-                    selected: selected,
-                    onSelected: (_) {
-                      _set(p);
-                      _persist(p);
-                    },
-                    selectedColor: AppTheme.accent.withValues(alpha: 0.25),
-                    labelStyle: TextStyle(
-                      color: selected ? AppTheme.accent : AppTheme.onSurface,
-                      fontWeight:
-                          selected ? FontWeight.w600 : FontWeight.w500,
-                    ),
-                    side: BorderSide(
-                      color: selected ? AppTheme.accent : AppTheme.divider,
-                    ),
-                    backgroundColor: AppTheme.card,
-                  );
-                }).toList(),
-              ),
-              Slider(
-                value: _value.toDouble(),
-                min: widget.min.toDouble(),
-                max: widget.max.toDouble(),
-                divisions: ((widget.max - widget.min) / _step).round(),
-                label: '$_value',
-                onChanged: (v) => _set(v.round()),
-                onChangeEnd: (v) => _persist(v.round()),
-              ),
-            ],
+          child: SteppedValuePicker(
+            value: _value,
+            min: widget.min,
+            sliderMax: widget.sliderMax,
+            step: _step,
+            suffix: 'cards',
+            onChanged: _set,
+            onCommit: _persist,
           ),
         ),
       ],
@@ -298,11 +255,11 @@ class _UnlockGoalPanelState extends ConsumerState<UnlockGoalPanel> {
   }
 }
 
-/// Preset chips + slider for the daily study target (unlocks everything until 3am).
+/// Slider + text field for the daily study target (unlocks everything until 3am).
 class DailyGoalPanel extends ConsumerStatefulWidget {
   final int initial;
   final int min;
-  final int max;
+  final int sliderMax;
   final bool showTitle;
   final ValueChanged<int>? onChanged;
 
@@ -310,7 +267,7 @@ class DailyGoalPanel extends ConsumerStatefulWidget {
     super.key,
     required this.initial,
     this.min = 5,
-    this.max = 200,
+    this.sliderMax = 100,
     this.showTitle = true,
     this.onChanged,
   });
@@ -320,34 +277,36 @@ class DailyGoalPanel extends ConsumerStatefulWidget {
 }
 
 class _DailyGoalPanelState extends ConsumerState<DailyGoalPanel> {
-  static const _presets = [20, 30, 50];
-
   late int _value;
   late int _committed;
+
+  int _coerce(int raw) => raw < widget.min ? widget.min : raw;
 
   @override
   void initState() {
     super.initState();
-    _value = widget.initial;
-    _committed = widget.initial;
+    _value = _coerce(widget.initial);
+    _committed = _value;
   }
 
   @override
   void didUpdateWidget(DailyGoalPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.initial != widget.initial) {
-      _value = widget.initial;
-      _committed = widget.initial;
+      _value = _coerce(widget.initial);
+      _committed = _value;
     }
   }
 
   void _set(int v) {
-    setState(() => _value = v);
-    widget.onChanged?.call(v);
+    final next = _coerce(v);
+    setState(() => _value = next);
+    widget.onChanged?.call(next);
   }
 
   Future<void> _persist(int v) async {
-    if (isWeakeningDailyGoal(current: _committed, proposed: v)) {
+    final next = _coerce(v);
+    if (isWeakeningDailyGoal(current: _committed, proposed: next)) {
       final ok = await ref
           .read(settingsProtectionServiceProvider)
           .requestProtectedEdit(
@@ -359,8 +318,8 @@ class _DailyGoalPanelState extends ConsumerState<DailyGoalPanel> {
         return;
       }
     }
-    await updateDailyCardsGoal(ref, v);
-    setState(() => _committed = v);
+    await updateDailyCardsGoal(ref, next);
+    setState(() => _committed = next);
   }
 
   @override
@@ -379,49 +338,13 @@ class _DailyGoalPanelState extends ConsumerState<DailyGoalPanel> {
         ],
         BrandCard(
           color: AppTheme.cardElevated,
-          child: Column(
-            children: [
-              Text(
-                '$_value cards per day',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-              ),
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 8,
-                children: _presets.map((p) {
-                  final selected = _value == p;
-                  return ChoiceChip(
-                    label: Text('$p'),
-                    selected: selected,
-                    onSelected: (_) {
-                      _set(p);
-                      _persist(p);
-                    },
-                    selectedColor: AppTheme.primary.withValues(alpha: 0.25),
-                    labelStyle: TextStyle(
-                      color: selected ? AppTheme.primary : AppTheme.onSurface,
-                      fontWeight:
-                          selected ? FontWeight.w600 : FontWeight.w500,
-                    ),
-                    side: BorderSide(
-                      color: selected ? AppTheme.primary : AppTheme.divider,
-                    ),
-                    backgroundColor: AppTheme.card,
-                  );
-                }).toList(),
-              ),
-              Slider(
-                value: _value.toDouble(),
-                min: widget.min.toDouble(),
-                max: widget.max.toDouble(),
-                divisions: widget.max - widget.min,
-                label: '$_value',
-                onChanged: (v) => _set(v.round()),
-                onChangeEnd: (v) => _persist(v.round()),
-              ),
-            ],
+          child: SteppedValuePicker(
+            value: _value,
+            min: widget.min,
+            sliderMax: widget.sliderMax,
+            suffix: 'cards per day',
+            onChanged: _set,
+            onCommit: _persist,
           ),
         ),
       ],

@@ -11,6 +11,7 @@ import '../../core/setup/setup_actions.dart';
 import '../../core/support/support_actions.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/blocking_goal.dart';
+import '../../core/widgets/stepped_value_picker.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -70,12 +71,12 @@ class _SettingsBody extends ConsumerWidget {
             title: const Text('Free-edit window'),
             subtitle: Text('$settingsUnlockMinutes min after unlock'),
             onTap: () async {
-              final result = await _pickInt(
+              final result = await showSteppedValuePickerDialog(
                 context,
                 title: 'Free-edit window',
                 initial: settingsUnlockMinutes,
                 min: 1,
-                max: 60,
+                sliderMax: 60,
                 suffix: 'minutes',
               );
               if (result != null) {
@@ -102,12 +103,12 @@ class _SettingsBody extends ConsumerWidget {
             title: const Text('Daily card goal'),
             subtitle: Text('$daily cards · free until 3am'),
             onTap: () async {
-              final result = await _pickInt(
+              final result = await showSteppedValuePickerDialog(
                 context,
                 title: 'Daily card goal',
                 initial: daily,
                 min: 5,
-                max: 200,
+                sliderMax: 100,
                 suffix: 'cards',
               );
               if (result == null) return;
@@ -129,15 +130,14 @@ class _SettingsBody extends ConsumerWidget {
           title: const Text('Temporary unlock'),
           subtitle: Text('$cards cards · all apps for $minutes min'),
           onTap: () async {
-            final result = await _pickInt(
+            final result = await showSteppedValuePickerDialog(
               context,
               title: 'Temporary unlock',
               initial: cards,
               min: 5,
-              max: 50,
+              sliderMax: 50,
               step: 5,
               suffix: 'cards',
-              presets: const [5, 10, 15, 20, 25, 30, 40, 50],
             );
             if (result == null) return;
             if (isWeakeningUnlockGoal(current: cards, proposed: result)) {
@@ -157,15 +157,14 @@ class _SettingsBody extends ConsumerWidget {
           title: const Text('Unlock length'),
           subtitle: Text('$minutes minutes'),
           onTap: () async {
-            final result = await _pickInt(
+            final result = await showSteppedValuePickerDialog(
               context,
               title: 'Unlock length',
               initial: minutes,
               min: 5,
-              max: 120,
+              sliderMax: 60,
               step: 5,
               suffix: 'minutes',
-              presets: const [5, 10, 15, 20, 30, 45, 60, 90, 120],
             );
             if (result != null) {
               await _save(ref, unlockDurationMinutes: Value(result));
@@ -218,12 +217,12 @@ class _SettingsBody extends ConsumerWidget {
           enabled: bypassEnabled,
           onTap: bypassEnabled
               ? () async {
-                  final result = await _pickInt(
+                  final result = await showSteppedValuePickerDialog(
                     context,
                     title: 'Daily bypass limit',
                     initial: bypassCap,
                     min: 1,
-                    max: 10,
+                    sliderMax: 10,
                     suffix: 'uses',
                   );
                   if (result == null) return;
@@ -440,93 +439,6 @@ class _SettingsBody extends ConsumerWidget {
     if (unlockDurationMinutes != null || isEnabled != null) {
       await syncBlockRuleToNative(ref);
     }
-  }
-
-  Future<int?> _pickInt(
-    BuildContext context, {
-    required String title,
-    required int initial,
-    required int min,
-    required int max,
-    required String suffix,
-    int step = 1,
-    List<int>? presets,
-  }) {
-    int snap(int raw) {
-      if (step <= 1) return raw.clamp(min, max);
-      final snapped = ((raw - min) / step).round() * step + min;
-      return snapped.clamp(min, max);
-    }
-
-    int value = snap(initial);
-    final chips = (presets ?? const <int>[])
-        .where((p) => p >= min && p <= max)
-        .toList();
-
-    return showDialog<int>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setState) => AlertDialog(
-          title: Text(title),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                '$value $suffix',
-                style: Theme.of(ctx).textTheme.headlineSmall,
-              ),
-              if (chips.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  alignment: WrapAlignment.center,
-                  children: [
-                    for (final p in chips)
-                      ChoiceChip(
-                        label: Text('$p'),
-                        selected: value == p,
-                        onSelected: (_) => setState(() => value = p),
-                        selectedColor: AppTheme.accent.withValues(alpha: 0.25),
-                        labelStyle: TextStyle(
-                          color: value == p
-                              ? AppTheme.accent
-                              : AppTheme.onSurface,
-                          fontWeight:
-                              value == p ? FontWeight.w600 : FontWeight.w500,
-                        ),
-                        side: BorderSide(
-                          color: value == p ? AppTheme.accent : AppTheme.divider,
-                        ),
-                      ),
-                  ],
-                ),
-              ],
-              Slider(
-                value: value.toDouble(),
-                min: min.toDouble(),
-                max: max.toDouble(),
-                divisions: step <= 1
-                    ? (max - min)
-                    : ((max - min) / step).round(),
-                label: '$value',
-                onChanged: (v) => setState(() => value = snap(v.round())),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, value),
-              child: const Text('Save'),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }
 
