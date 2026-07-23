@@ -13,6 +13,14 @@ class SupportPromptService {
     return count;
   }
 
+  /// Clears open counting so setup / settings trips don't burn the cadence.
+  Future<void> resetLaunchTracking() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_launchCountKey);
+    await prefs.remove(_dismissedAtLaunchKey);
+  }
+
+  /// Show on the 4th, 8th, … open — never on the first.
   Future<bool> shouldShowPrompt(int launchCount) async {
     if (launchCount < showEvery || launchCount % showEvery != 0) {
       return false;

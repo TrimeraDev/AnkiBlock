@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/services.dart';
@@ -80,8 +79,9 @@ extension CachedInstalledAppX on CachedInstalledApp {
       );
 }
 
-/// Social apps highlighted during onboarding setup.
-const Set<String> kSuggestedSocialPackages = {
+/// Common social / distracting apps suggested for blocking (onboarding + Block).
+const Set<String> kSuggestedBlockPackages = {
+  // Social
   'com.zhiliaoapp.musically', // TikTok (intl)
   'com.ss.android.ugc.trill', // TikTok (other regions)
   'com.instagram.android',
@@ -94,11 +94,6 @@ const Set<String> kSuggestedSocialPackages = {
   'com.pinterest',
   'com.linkedin.android',
   'com.discord',
-};
-
-/// Common social / distracting apps. Used in the blocking screen banner.
-const Set<String> kSuggestedBlockPackages = {
-  ...kSuggestedSocialPackages,
   // Video
   'com.google.android.youtube',
   'com.netflix.mediaclient',
@@ -119,9 +114,46 @@ class DelegatedSessionProgress {
   final int completed;
   final int target;
 
+  /// Blocked app package, or [kPracticeStudyPackage] for home practice.
+  final String packageName;
+
   const DelegatedSessionProgress({
     required this.completed,
     required this.target,
+    this.packageName = '',
+  });
+
+  bool get isPractice => packageName == kPracticeStudyPackage;
+
+  bool isForPackage(String pkg) =>
+      packageName.isNotEmpty && packageName == pkg;
+}
+
+/// Result of starting a native delegated session (may already be unlocked).
+class DelegatedSessionStartResult {
+  final bool unlocked;
+  final int seeded;
+  final int target;
+
+  const DelegatedSessionStartResult({
+    required this.unlocked,
+    required this.seeded,
+    required this.target,
+  });
+}
+
+/// Snapshot of an in-progress native unlock session.
+class DelegatedSessionState {
+  final String packageName;
+  final int completed;
+  final int target;
+  final int seeded;
+
+  const DelegatedSessionState({
+    required this.packageName,
+    required this.completed,
+    required this.target,
+    required this.seeded,
   });
 }
 
@@ -147,6 +179,10 @@ class AppsService {
   final _gateController = StreamController<GateRequest>.broadcast();
   Stream<GateRequest> get gateRequests => _gateController.stream;
 
+  final _openHomeController = StreamController<void>.broadcast();
+  /// Launcher / normal app open — leave the study gate and show Today.
+  Stream<void> get openHomeRequests => _openHomeController.stream;
+
   final _delegatedUnlockController = StreamController<int>.broadcast();
   Stream<int> get delegatedUnlocks => _delegatedUnlockController.stream;
 
@@ -166,12 +202,19 @@ class AppsService {
         args['packageName'] as String? ?? '',
         args['appName'] as String? ?? '',
       ));
+    } else if (call.method == 'openHome') {
+      _openHomeController.add(null);
     } else if (call.method == 'onDelegatedProgress') {
       final args = Map<String, dynamic>.from(call.arguments as Map);
       final completed = (args['completed'] as num?)?.toInt() ?? 0;
       final target = (args['target'] as num?)?.toInt() ?? 0;
+      final packageName = args['packageName'] as String? ?? '';
       _delegatedProgressController.add(
-        DelegatedSessionProgress(completed: completed, target: target),
+        DelegatedSessionProgress(
+          completed: completed,
+          target: target,
+          packageName: packageName,
+        ),
       );
     } else if (call.method == 'onDelegatedUnlock') {
       final args = Map<String, dynamic>.from(call.arguments as Map);
@@ -233,7 +276,8 @@ class AppsService {
     required int bypassSeconds,
     required bool isEnabled,
     required String studyMode,
-    required String blockingMode,
+    required int unlockGoal,
+    required bool bypassEnabled,
   }) async {
     if (!Platform.isAndroid) return;
     await _channel.invokeMethod('syncBlockRuleSettings', {
@@ -241,7 +285,8 @@ class AppsService {
       'bypassSeconds': bypassSeconds,
       'isEnabled': isEnabled,
       'studyMode': studyMode,
-      'blockingMode': blockingMode,
+      'unlockGoal': unlockGoal,
+      'bypassEnabled': bypassEnabled,
     });
   }
 
@@ -293,29 +338,97 @@ class AppsService {
   }
 
   /// Starts a delegated study session tracked by [AppMonitorService] while the
-  /// user reviews in AnkiDroid.
-  Future<void> startDelegatedSession({
+  /// user reviews in AnkiDroid. Progress is counted from schedule card keys /
+  /// reps only (not due-count diffs).
+  ///
+  /// Returns unlock/seed info from native. When [DelegatedSessionStartResult.unlocked]
+  /// is true, a recent study bout already met the target — skip opening Anki.
+  Future<DelegatedSessionStartResult> startDelegatedSession({
     required String packageName,
     required String appName,
     required int deckId,
     required List<int> deckIds,
     required int target,
-    required int baseline,
   }) async {
-    if (!Platform.isAndroid) return;
-    await _channel.invokeMethod('startDelegatedSession', {
+    if (!Platform.isAndroid) {
+      return DelegatedSessionStartResult(
+        unlocked: false,
+        seeded: 0,
+        target: target,
+      );
+    }
+    final raw = await _channel.invokeMethod<dynamic>('startDelegatedSession', {
       'packageName': packageName,
       'appName': appName,
       'deckId': deckId,
       'deckIds': deckIds,
       'target': target,
-      'baseline': baseline,
     });
+    if (raw is Map) {
+      return DelegatedSessionStartResult(
+        unlocked: raw['unlocked'] == true,
+        seeded: (raw['seeded'] as num?)?.toInt() ?? 0,
+        target: (raw['target'] as num?)?.toInt() ?? target,
+      );
+    }
+    return DelegatedSessionStartResult(
+      unlocked: false,
+      seeded: 0,
+      target: target,
+    );
   }
 
   Future<void> cancelDelegatedSession() async {
     if (!Platform.isAndroid) return;
     await _channel.invokeMethod('cancelDelegatedSession');
+  }
+
+  /// Restores in-progress unlock session progress after Flutter state loss.
+  Future<DelegatedSessionState?> getDelegatedSessionState() async {
+    if (!Platform.isAndroid) return null;
+    final raw =
+        await _channel.invokeMethod<dynamic>('getDelegatedSessionState');
+    if (raw is! Map) return null;
+    final target = (raw['target'] as num?)?.toInt() ?? 0;
+    if (target <= 0) return null;
+    final pkg = raw['packageName'] as String? ?? '';
+    if (pkg.isEmpty) return null;
+    return DelegatedSessionState(
+      packageName: pkg,
+      completed: (raw['completed'] as num?)?.toInt() ?? 0,
+      target: target,
+      seeded: (raw['seeded'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  /// Recent soft-study bout size (cards within the idle gap).
+  Future<int> getStudyBoutCount() async {
+    if (!Platform.isAndroid) return 0;
+    final n = await _channel.invokeMethod<int>('getStudyBoutCount');
+    return n ?? 0;
+  }
+
+  /// Grants temp unlock when bout already meets [target]; otherwise false.
+  Future<bool> tryUnlockFromRecentBout({
+    required String packageName,
+    required String appName,
+    required int target,
+  }) async {
+    if (!Platform.isAndroid) return false;
+    final ok = await _channel.invokeMethod<bool>('tryUnlockFromRecentBout', {
+      'packageName': packageName,
+      'appName': appName,
+      'target': target,
+    });
+    return ok ?? false;
+  }
+
+  Future<bool> isTemporarilyUnlocked(String packageName) async {
+    if (!Platform.isAndroid) return false;
+    final ok = await _channel.invokeMethod<bool>('isTemporarilyUnlocked', {
+      'packageName': packageName,
+    });
+    return ok ?? false;
   }
 
   Future<bool> launchApp(String packageName) async {

@@ -36,6 +36,7 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
   bool _delegating = false;
   bool _bypassing = false;
   bool _autoLaunched = false;
+  int _boutPreview = 0;
 
   @override
   void initState() {
@@ -44,6 +45,7 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _recordBlockedAttempt();
       _maybeAutoLaunch();
+      _loadBoutPreview();
       ref.invalidate(gateTodayUsageProvider(widget.packageName));
     });
   }
@@ -58,7 +60,16 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       ref.invalidate(gateTodayUsageProvider(widget.packageName));
+      ref.invalidate(studyCountsProvider);
+      ref.invalidate(dailyStatsProvider(studyDayKey()));
+      unawaited(_loadBoutPreview());
     }
+  }
+
+  Future<void> _loadBoutPreview() async {
+    final bout = await ref.read(appsServiceProvider).getStudyBoutCount();
+    if (!mounted) return;
+    setState(() => _boutPreview = bout);
   }
 
   Future<void> _recordBlockedAttempt() async {
@@ -102,7 +113,9 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
     try {
       final scope = await ref.read(studyScopeProvider.future);
       final decks = await ref.read(ankiDroidDecksProvider.future);
-      await startScopedStudySession(
+      // Always start/ensure a *gate* unlock session for this package.
+      // Do not resume home-practice progress — that never grants app unlock.
+      final start = await startScopedStudySession(
         ref: ref,
         scope: scope,
         decks: decks,
@@ -111,6 +124,14 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
         unlockAppName: widget.appName,
         forGate: true,
       );
+      if (start.alreadyUnlocked) {
+        final launched = await ref
+            .read(appsServiceProvider)
+            .launchApp(widget.packageName);
+        if (mounted && launched) {
+          context.go('/');
+        }
+      }
     } finally {
       if (mounted) setState(() => _delegating = false);
     }
@@ -172,18 +193,84 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
       obligationDue: obligation,
     );
     final dailyRemaining = (dailyGoal - reviewed).clamp(0, dailyGoal);
-    final progress = switch (mode) {
+
+    // Per-app unlock session only — ignore home practice progress.
+    final rawSession = ref.watch(delegatedSessionProgressProvider);
+    final session = rawSession != null &&
+            rawSession.isForPackage(widget.packageName)
+        ? rawSession
+        : null;
+    final boutCredit = _boutPreview.clamp(0, unlockGoal);
+    final unlockDone = session?.completed ?? boutCredit;
+    final unlockTarget = session?.target ?? unlockGoal;
+    final unlockRemaining =
+        goalComplete ? 0 : (unlockTarget - unlockDone).clamp(0, unlockTarget);
+    final hasUnlockProgress = !goalComplete && unlockDone > 0;
+
+    final freedomProgress = switch (mode) {
       StudyMode.dueCards => obligation <= 0 ? 1.0 : 0.0,
       StudyMode.cardCount => dailyGoal > 0
           ? (reviewed / dailyGoal).clamp(0.0, 1.0)
           : 0.0,
     };
-    final remaining = goalComplete ? 0 : unlockGoal;
+    final unlockProgress = unlockTarget > 0
+        ? (unlockDone / unlockTarget).clamp(0.0, 1.0)
+        : 0.0;
+    final ringProgress =
+        goalComplete ? 1.0 : (session != null ? unlockProgress : freedomProgress);
+
+    final obligationSummary =
+        '${counts.learnCount} learning · ${counts.reviewCount} to review';
+    final headlineBefore = goalComplete
+        ? (mode == StudyMode.dueCards
+            ? 'Learning & reviews done. '
+            : 'Daily goal done. ')
+        : 'Study first. ';
+    final headlineAccent = goalComplete ? 'Enjoy.' : 'Unlock later.';
+
+    // Primary: this app's unlock. Secondary: full-day freedom.
+    final statusLine = goalComplete
+        ? (mode == StudyMode.dueCards
+            ? 'Unlocked · queue cleared'
+            : 'Unlocked until 3am')
+        : hasUnlockProgress
+            ? '$unlockDone / $unlockTarget to unlock'
+            : '$unlockGoal cards to unlock';
+    final statusDetail = goalComplete
+        ? (mode == StudyMode.dueCards
+            ? 'You finished learning and reviews. All blocked apps are open '
+                'until more come due.'
+                '${counts.newCount > 0 ? ' ${counts.newCount} new still available.' : ''}'
+            : 'You finished your daily goal. All blocked apps '
+                'are open for the rest of the study day.')
+        : mode == StudyMode.dueCards
+            ? (hasUnlockProgress
+                ? '$unlockRemaining more for a temporary unlock. '
+                    '$obligationSummary left today.'
+                : 'Study $unlockGoal cards for a temporary unlock. '
+                    '$obligationSummary left today.')
+            : (hasUnlockProgress
+                ? '$unlockRemaining more for a temporary unlock. '
+                    '$dailyRemaining left for freedom until 3am.'
+                : 'Study $unlockGoal cards for a temporary unlock. '
+                    '$dailyRemaining left for freedom until 3am.');
+
+    final studyButtonLabel = !ankiReady
+        ? 'Set up AnkiDroid first'
+        : _delegating
+            ? 'Opening AnkiDroid…'
+            : (available == 0
+                ? 'No cards due'
+                : !hasDecksSelected
+                    ? 'Select decks first'
+                    : hasUnlockProgress
+                        ? 'Continue studying'
+                        : 'Study in AnkiDroid');
 
     final rule = ruleAsync.valueOrNull;
     final bypassEnabled = rule?.bypassEnabled ?? true;
-    final bypassCap = rule?.bypassDailyCap ?? 2;
-    final bypassSeconds = rule?.bypassSeconds ?? 60;
+    final bypassCap = rule?.bypassDailyCap ?? 3;
+    const bypassSeconds = kBypassSeconds;
     final bypassesUsed = dailyStatsAsync.valueOrNull?.bypassesUsed ?? 0;
     final bypassesLeft = bypassesRemaining(
       bypassEnabled: bypassEnabled,
@@ -197,38 +284,7 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
           bypassDailyCap: bypassCap,
           bypassesUsed: bypassesUsed,
         );
-
     final canStudy = ankiReady && available > 0 && hasDecksSelected;
-
-    final headlineBefore = goalComplete
-        ? (mode == StudyMode.dueCards
-            ? 'Learning & reviews done. '
-            : 'Daily goal done. ')
-        : 'Study first. ';
-    final headlineAccent = goalComplete ? 'Enjoy.' : 'Unlock later.';
-    final statusLine = goalComplete
-        ? (mode == StudyMode.dueCards
-            ? 'Unlocked · queue cleared'
-            : 'Unlocked until 3am')
-        : remaining > 0
-            ? '$remaining cards to unlock'
-            : 'Goal complete!';
-    final queueSummary =
-        '${counts.learnCount} learning · ${counts.reviewCount} to review'
-        '${counts.newCount > 0 ? ' · ${counts.newCount} new' : ''}';
-    final statusDetail = goalComplete
-        ? (mode == StudyMode.dueCards
-            ? 'You finished learning & reviews. All blocked apps are open. '
-                '${counts.newCount > 0 ? '${counts.newCount} new left (optional).' : ''}'
-            : 'You finished your daily goal. All blocked apps '
-                'are open for the rest of the study day.')
-        : mode == StudyMode.dueCards
-            ? 'Study $unlockGoal cards to open ${widget.appName}. '
-                'Finish learning & reviews to unlock everything. '
-                '($queueSummary)'
-            : 'Study $unlockGoal cards from your selected decks '
-                'to open ${widget.appName}. '
-                '$dailyRemaining more today unlocks everything.';
 
     return PopScope(
       canPop: false,
@@ -243,7 +299,7 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
               children: [
                 Center(
                   child: GradientProgressRing(
-                    progress: progress,
+                    progress: ringProgress,
                     complete: goalComplete,
                     size: 120,
                     strokeWidth: 8,
@@ -339,8 +395,8 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
                 if (ankiReady && hasDecksSelected && available == 0) ...[
                   const SizedBox(height: 16),
                   Text(
-                    'No cards are due right now. Come back when you have '
-                    'reviews waiting.',
+                    'No learning or review cards right now. Come back when '
+                    'AnkiDroid has cards waiting.',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: AppTheme.onSurfaceVariant,
@@ -353,8 +409,11 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
                     onPressed: !ankiReady
                         ? () => context.push('/ankidroid')
                         : canStudy && !_delegating
-                            ? () =>
-                                _studyInAnkiDroid(cardsRequired: unlockGoal)
+                            ? () => _studyInAnkiDroid(
+                                  cardsRequired: unlockRemaining > 0
+                                      ? unlockRemaining
+                                      : unlockGoal,
+                                )
                             : null,
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -371,17 +430,7 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
                         else
                           const Icon(Icons.open_in_new),
                         const SizedBox(width: 8),
-                        Text(
-                          !ankiReady
-                              ? 'Set up AnkiDroid first'
-                              : _delegating
-                                  ? 'Opening AnkiDroid…'
-                                  : (available == 0
-                                      ? 'No cards due'
-                                      : !hasDecksSelected
-                                          ? 'Select decks first'
-                                          : 'Study in AnkiDroid'),
-                        ),
+                        Text(studyButtonLabel),
                       ],
                     ),
                   ),

@@ -23,7 +23,7 @@ int countDueInScope(StudyScope scope, List<AnkiDroidDeck> decks) {
   final enabledIds = scope.filterDeckIds(decks.map((d) => d.id)).toSet();
   return decks
       .where((d) => enabledIds.contains(d.id))
-      .fold(0, (sum, d) => sum + d.totalDue);
+      .fold(0, (sum, d) => sum + d.obligationDue);
 }
 
 /// Hint for which deck AnkiDroid opens when multiple are selected.

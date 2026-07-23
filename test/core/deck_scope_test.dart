@@ -151,17 +151,36 @@ void main() {
   });
 
   group('countDueInScope', () {
-    test('sums due across enabled decks', () {
+    test('sums learning+reviews across enabled decks (excludes new)', () {
       const scope = StudyScope(
         mode: StudyScopeMode.multi,
         disabledDeckIds: {2},
         activeDeckId: null,
       );
       final decks = [
-        _deck(1, 'A', due: 10),
-        _deck(2, 'B', due: 99),
-        _deck(3, 'C', due: 5),
+        const AnkiDroidDeck(
+          id: 1,
+          name: 'A',
+          learnCount: 4,
+          reviewCount: 6,
+          newCount: 20,
+        ),
+        const AnkiDroidDeck(
+          id: 2,
+          name: 'B',
+          learnCount: 50,
+          reviewCount: 49,
+          newCount: 0,
+        ),
+        const AnkiDroidDeck(
+          id: 3,
+          name: 'C',
+          learnCount: 1,
+          reviewCount: 4,
+          newCount: 10,
+        ),
       ];
+      // Enabled: A + C → (4+6) + (1+4) = 15
       expect(countDueInScope(scope, decks), 15);
     });
   });

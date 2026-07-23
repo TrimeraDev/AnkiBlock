@@ -34,27 +34,23 @@ class StudyModePanel extends ConsumerWidget {
           Text('Study mode', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 4),
           Text(
-            'Choose how blocked apps unlock for the day.',
+            'Daily freedom for the day. Temporary unlock (below) is separate.',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 16),
         ],
         _ModeOption(
           selected: mode == StudyMode.dueCards,
-          title: 'Anki queue',
-          subtitle:
-              'Blocked apps unlock when learning & reviews are done in '
-              'your selected decks. New cards are optional.',
+          title: 'Clear learning & reviews',
+          subtitle: 'Free when Anki learning + to-review hit zero.',
           badge: 'Recommended',
           onTap: () => updateStudyMode(ref, StudyMode.dueCardsValue),
         ),
         const SizedBox(height: 10),
         _ModeOption(
           selected: mode == StudyMode.cardCount,
-          title: 'Card count',
-          subtitle:
-              'Study a fixed number of cards per day to unlock everything '
-              'until 3am. Ignores AnkiDroid\'s queue.',
+          title: 'Fixed daily card count',
+          subtitle: 'Free until 3am after today\'s card goal.',
           onTap: () async {
             final due =
                 ref.read(studyCountsProvider).valueOrNull?.obligationDue ?? 0;
@@ -169,7 +165,7 @@ class UnlockGoalPanel extends ConsumerStatefulWidget {
   const UnlockGoalPanel({
     super.key,
     required this.initial,
-    this.min = 1,
+    this.min = 5,
     this.max = 50,
     this.showTitle = true,
     this.onChanged,
@@ -180,15 +176,23 @@ class UnlockGoalPanel extends ConsumerStatefulWidget {
 }
 
 class _UnlockGoalPanelState extends ConsumerState<UnlockGoalPanel> {
-  static const _presets = [10, 25, 50];
+  static const _presets = [5, 10, 15, 20, 25, 30, 50];
+  static const _step = 5;
 
   late int _value;
   late int _committed;
 
+  int _snap(int raw) {
+    final min = widget.min;
+    final max = widget.max;
+    final snapped = ((raw - min) / _step).round() * _step + min;
+    return snapped.clamp(min, max);
+  }
+
   @override
   void initState() {
     super.initState();
-    _value = widget.initial;
+    _value = _snap(widget.initial);
     _committed = widget.initial;
   }
 
@@ -196,18 +200,19 @@ class _UnlockGoalPanelState extends ConsumerState<UnlockGoalPanel> {
   void didUpdateWidget(UnlockGoalPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.initial != widget.initial) {
-      _value = widget.initial;
+      _value = _snap(widget.initial);
       _committed = widget.initial;
     }
   }
 
   void _set(int v) {
-    setState(() => _value = v);
-    widget.onChanged?.call(v);
+    setState(() => _value = _snap(v));
+    widget.onChanged?.call(_value);
   }
 
   Future<void> _persist(int v) async {
-    if (isWeakeningUnlockGoal(current: _committed, proposed: v)) {
+    final next = _snap(v);
+    if (isWeakeningUnlockGoal(current: _committed, proposed: next)) {
       final ok = await ref
           .read(settingsProtectionServiceProvider)
           .requestProtectedEdit(
@@ -215,12 +220,12 @@ class _UnlockGoalPanelState extends ConsumerState<UnlockGoalPanel> {
             kind: ProtectedEditKind.lowerUnlockGoal,
           );
       if (!ok) {
-        setState(() => _value = _committed);
+        setState(() => _value = _snap(_committed));
         return;
       }
     }
-    await updateCardsRequired(ref, v);
-    setState(() => _committed = v);
+    await updateCardsRequired(ref, next);
+    setState(() => _committed = next);
   }
 
   @override
@@ -229,10 +234,10 @@ class _UnlockGoalPanelState extends ConsumerState<UnlockGoalPanel> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (widget.showTitle) ...[
-          Text('Unlock goal', style: Theme.of(context).textTheme.titleMedium),
+          Text('Temporary unlock', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 4),
           Text(
-            'How many cards to study each time you open a blocked app.',
+            'Short unlock for all blocked apps — not the whole day.',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 16),
@@ -242,7 +247,7 @@ class _UnlockGoalPanelState extends ConsumerState<UnlockGoalPanel> {
           child: Column(
             children: [
               Text(
-                '$_value cards per unlock',
+                '$_value cards',
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
@@ -250,7 +255,11 @@ class _UnlockGoalPanelState extends ConsumerState<UnlockGoalPanel> {
               const SizedBox(height: 16),
               Wrap(
                 spacing: 8,
+                runSpacing: 8,
                 children: _presets.map((p) {
+                  if (p < widget.min || p > widget.max) {
+                    return const SizedBox.shrink();
+                  }
                   final selected = _value == p;
                   return ChoiceChip(
                     label: Text('$p'),
@@ -276,7 +285,7 @@ class _UnlockGoalPanelState extends ConsumerState<UnlockGoalPanel> {
                 value: _value.toDouble(),
                 min: widget.min.toDouble(),
                 max: widget.max.toDouble(),
-                divisions: widget.max - widget.min,
+                divisions: ((widget.max - widget.min) / _step).round(),
                 label: '$_value',
                 onChanged: (v) => _set(v.round()),
                 onChangeEnd: (v) => _persist(v.round()),
@@ -360,12 +369,10 @@ class _DailyGoalPanelState extends ConsumerState<DailyGoalPanel> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (widget.showTitle) ...[
-          Text('Daily goal', style: Theme.of(context).textTheme.titleMedium),
+          Text('Daily card goal', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 4),
           Text(
-            'Finish this many cards to unlock all blocked apps for the day. '
-            'Counts study in AnkiDroid even if you open it directly. '
-            'Resets at 3am.',
+            'Full-day freedom until 3am.',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 16),
@@ -473,7 +480,7 @@ class AppBlockSetupPanel extends ConsumerWidget {
         final list = apps.where((a) => !a.isSystem).toList()..sort(compareApps);
 
         final suggested = list
-            .where((a) => kSuggestedSocialPackages.contains(a.packageName))
+            .where((a) => kSuggestedBlockPackages.contains(a.packageName))
             .toList();
         if (list.isEmpty) {
           return Padding(
@@ -500,7 +507,7 @@ class AppBlockSetupPanel extends ConsumerWidget {
             final app = list[i];
             final isBlocked = blockedSet.contains(app.packageName);
             final isSuggested =
-                kSuggestedSocialPackages.contains(app.packageName);
+                kSuggestedBlockPackages.contains(app.packageName);
             return _AppToggleRow(
               app: app,
               isBlocked: isBlocked,

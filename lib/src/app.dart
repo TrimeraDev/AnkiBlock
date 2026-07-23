@@ -22,6 +22,7 @@ class AnkiBlockApp extends ConsumerStatefulWidget {
 class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
     with WidgetsBindingObserver {
   StreamSubscription<GateRequest>? _gateSub;
+  StreamSubscription<void>? _openHomeSub;
   StreamSubscription<int>? _delegatedUnlockSub;
   StreamSubscription<DelegatedSessionProgress>? _delegatedProgressSub;
   StreamSubscription<int>? _passiveStudySub;
@@ -55,6 +56,10 @@ class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
   }
 
   Future<void> _recordAppOpen() async {
+    final onboardingDone = await ref.read(onboardingCompleteProvider.future);
+    // Permission settings trips during setup must not count as opens.
+    if (!onboardingDone) return;
+
     final service = ref.read(supportPromptServiceProvider);
     final count = await service.recordLaunch();
     ref.read(appLaunchCountProvider.notifier).state = count;
@@ -69,6 +74,35 @@ class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
     await syncBlockRuleToNative(ref);
     await ensureAppMonitorRunning(ref);
     await syncDailyGoalToNative(ref);
+    await _restoreDelegatedSessionProgress();
+    // Refresh live Anki due counts after studying (or any background trip).
+    ref.invalidate(studyCountsProvider);
+    ref.invalidate(ankiDroidDecksProvider);
+    ref.invalidate(ankiDroidStatusProvider);
+    ref.invalidate(dailyStatsProvider(studyDayKey()));
+  }
+
+  Future<void> _restoreDelegatedSessionProgress() async {
+    final state = await ref.read(appsServiceProvider).getDelegatedSessionState();
+    if (state == null || state.packageName == kPracticeStudyPackage) {
+      return;
+    }
+    final existing = ref.read(delegatedSessionProgressProvider);
+    if (existing != null &&
+        existing.isForPackage(state.packageName) &&
+        existing.completed >= state.completed) {
+      return;
+    }
+    ref.read(delegatedProgressCreditFloorProvider.notifier).state = state.seeded;
+    if (_lastProgressCounted < state.seeded) {
+      _lastProgressCounted = state.seeded;
+    }
+    ref.read(delegatedSessionProgressProvider.notifier).state =
+        DelegatedSessionProgress(
+      completed: state.completed,
+      target: state.target,
+      packageName: state.packageName,
+    );
   }
 
   Future<void> _syncNativeWhenAnkiReady() async {
@@ -83,9 +117,14 @@ class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
   Future<void> _bootstrap() async {
     final svc = ref.read(appsServiceProvider);
     _gateSub = svc.gateRequests.listen(_handleGate);
+    _openHomeSub = svc.openHomeRequests.listen((_) => _openHome());
     _delegatedUnlockSub = svc.delegatedUnlocks.listen(_handleDelegatedUnlock);
     _delegatedProgressSub = svc.delegatedProgress.listen((progress) async {
       ref.read(delegatedSessionProgressProvider.notifier).state = progress;
+      final floor = ref.read(delegatedProgressCreditFloorProvider);
+      if (_lastProgressCounted < floor) {
+        _lastProgressCounted = floor;
+      }
       if (progress.completed <= _lastProgressCounted) return;
       final delta = progress.completed - _lastProgressCounted;
       _lastProgressCounted = progress.completed;
@@ -105,7 +144,17 @@ class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
       ref.invalidate(studyProgressProvider);
     });
 
-    // Re-sync blocked list and start monitor on every cold start
+    // Gate from cold start: route immediately, sync in background.
+    final pending = await svc.consumePendingGate();
+    if (pending != null) {
+      _handleGate(pending);
+    }
+
+    unawaited(_syncBootstrap());
+  }
+
+  Future<void> _syncBootstrap() async {
+    final svc = ref.read(appsServiceProvider);
     final db = ref.read(databaseProvider);
     final all = await db.watchAllBlockedApps().first;
     final active = all
@@ -120,13 +169,6 @@ class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
     await syncDailyGoalToNative(ref);
 
     unawaited(_syncNativeWhenAnkiReady());
-
-    // If launched from a gate intent, consume and route
-    final pending = await svc.consumePendingGate();
-    if (pending != null) _handleGate(pending);
-
-    // Warm the installed-apps cache in the background so the blocking screen
-    // opens instantly on repeat visits.
     unawaited(ref.read(installedAppsProvider.future));
   }
 
@@ -134,7 +176,13 @@ class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
     unawaited(_routeGate(req));
   }
 
+  void _openHome() {
+    ref.read(routerProvider).go('/');
+  }
+
   Future<void> _routeGate(GateRequest req) async {
+    final router = ref.read(routerProvider);
+    final apps = ref.read(appsServiceProvider);
     final rule = await ref.read(blockRuleProvider.future);
     final day = studyDayKey();
     final reviewed =
@@ -147,18 +195,38 @@ class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
       cardsReviewed: reviewed,
       obligationDue: due,
     )) {
-      await ref.read(appsServiceProvider).launchApp(req.packageName);
+      await apps.launchApp(req.packageName);
+      router.go('/');
       return;
     }
-    final router = ref.read(routerProvider);
+
+    final unlockGoal = rule?.cardsRequired ?? 10;
+    if (await apps.isTemporarilyUnlocked(req.packageName)) {
+      await apps.launchApp(req.packageName);
+      router.go('/');
+      return;
+    }
+    if (await apps.tryUnlockFromRecentBout(
+      packageName: req.packageName,
+      appName: req.appName,
+      target: unlockGoal,
+    )) {
+      await apps.launchApp(req.packageName);
+      router.go('/');
+      return;
+    }
+
+    // Blocked — show the full Flutter gate (engine is pre-warmed).
     router.go('/gate', extra: {
       'packageName': req.packageName,
       'appName': req.appName,
     });
+    unawaited(_restoreDelegatedSessionProgress());
   }
 
   Future<void> _handleDelegatedUnlock(int cardsCompleted) async {
     ref.read(delegatedSessionProgressProvider.notifier).state = null;
+    ref.read(delegatedProgressCreditFloorProvider.notifier).state = 0;
     _lastProgressCounted = 0;
     final today = studyDayKey();
     final db = ref.read(databaseProvider);
@@ -174,6 +242,7 @@ class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _gateSub?.cancel();
+    _openHomeSub?.cancel();
     _delegatedUnlockSub?.cancel();
     _delegatedProgressSub?.cancel();
     _passiveStudySub?.cancel();

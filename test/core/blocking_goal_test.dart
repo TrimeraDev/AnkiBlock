@@ -3,7 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('isBlockingGoalComplete', () {
-    test('dueCards complete when obligation cleared even with new left', () {
+    test('dueCards complete when learning+reviews cleared even if new remain',
+        () {
       expect(
         isBlockingGoalComplete(
           mode: StudyMode.dueCards,
@@ -92,23 +93,6 @@ void main() {
           current: StudyMode.cardCount,
           proposed: StudyMode.dueCards,
           obligationDue: 10,
-        ),
-        isFalse,
-      );
-    });
-
-    test('lockdown to selectedApps is weakening', () {
-      expect(
-        isWeakeningBlockingMode(
-          current: BlockingMode.lockdown,
-          proposed: BlockingMode.selectedApps,
-        ),
-        isTrue,
-      );
-      expect(
-        isWeakeningBlockingMode(
-          current: BlockingMode.selectedApps,
-          proposed: BlockingMode.lockdown,
         ),
         isFalse,
       );

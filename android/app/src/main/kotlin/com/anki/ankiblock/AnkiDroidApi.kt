@@ -258,8 +258,8 @@ class AnkiDroidApi(private val context: Context) {
         return learn + review + newC
     }
 
-    /** learn + review only — Anki's daily obligation (excludes new). */
-    fun deckObligationTotal(deckId: Long): Int {
+    /** Anki obligation: learning + to-review only (excludes new). */
+    fun deckObligationDue(deckId: Long): Int {
         val (learn, review, _) = deckCounts(deckId) ?: return 0
         return learn + review
     }
@@ -272,7 +272,8 @@ class AnkiDroidApi(private val context: Context) {
             if (c.moveToFirst()) {
                 val countsIdx = columnIndex(c, DECK_COUNT, "deck_counts")
                 val counts = if (countsIdx >= 0) c.getString(countsIdx) else null
-                return parseDeckCounts(counts)
+                val (learn, review, newC) = parseDeckCounts(counts)
+                return Triple(learn, review, newC)
             }
         }
         for (deck in listDecks()) {

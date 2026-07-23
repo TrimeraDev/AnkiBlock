@@ -27,7 +27,11 @@ class AnkiDroidDeck {
     required this.newCount,
   });
 
+  /// Full deck queue including today's new cards.
   int get totalDue => learnCount + reviewCount + newCount;
+
+  /// Anki obligation (learning + to-review); excludes new.
+  int get obligationDue => learnCount + reviewCount;
 
   factory AnkiDroidDeck.fromMap(Map<dynamic, dynamic> m) => AnkiDroidDeck(
         id: (m['id'] as num).toInt(),
@@ -198,14 +202,14 @@ class AnkiDroidCounts {
   static const zero =
       AnkiDroidCounts(learnCount: 0, reviewCount: 0, newCount: 0);
 
-  /// Full AnkiDroid studyable queue (new + learning + reviews).
+  /// Full Study Now–sized queue (learning + reviews + today's new).
   int get studyable => learnCount + reviewCount + newCount;
 
-  /// Anki's daily obligation: learning + to-review (excludes new cards).
+  /// Anki obligation for blocking: learning + to-review (excludes new).
   int get obligationDue => learnCount + reviewCount;
 
   /// Same shape the gate/today UI used to expect from the local DB
   /// (`due` = learn + review, `newCount` = new).
   ({int due, int newCount}) toDueNew() =>
-      (due: learnCount + reviewCount, newCount: newCount);
+      (due: obligationDue, newCount: newCount);
 }

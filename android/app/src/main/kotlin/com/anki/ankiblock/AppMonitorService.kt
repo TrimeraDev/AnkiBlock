@@ -46,6 +46,13 @@ class AppMonitorService : Service() {
         const val KEY_DELEGATED_CARD_KEYS = "delegated_card_keys"
         const val KEY_DELEGATED_COMPLETE_STREAK = "delegated_complete_streak"
         const val KEY_DELEGATED_STARTED_AT = "delegated_started_at"
+        const val KEY_DELEGATED_SEEDED = "delegated_seeded_completed"
+        const val KEY_DELEGATED_LAST_REPS = "delegated_last_reps"
+
+        /** Soft study bout — recent cards credit temporary unlock. */
+        const val KEY_STUDY_BOUT_COUNT = "study_bout_count"
+        const val KEY_STUDY_BOUT_LAST_MS = "study_bout_last_ms"
+        const val STUDY_BOUT_IDLE_GAP_MS = 5 * 60_000L
 
         const val KEY_DAILY_GOAL = "daily_goal"
         const val KEY_DAILY_REVIEWED = "daily_cards_reviewed"
@@ -58,11 +65,6 @@ class AppMonitorService : Service() {
 
         const val STUDY_MODE_DUE_CARDS = "dueCards"
         const val STUDY_MODE_CARD_COUNT = "cardCount"
-
-        const val KEY_BLOCKING_MODE = "blocking_mode"
-        const val KEY_ALLOWLIST = "allowlist_packages_csv"
-        const val BLOCKING_MODE_SELECTED = "selectedApps"
-        const val BLOCKING_MODE_LOCKDOWN = "lockdown"
 
         const val KEY_PASSIVE_STUDY_DAY = "passive_study_day"
         const val KEY_PASSIVE_CARD_KEYS = "passive_card_keys"
@@ -86,8 +88,12 @@ class AppMonitorService : Service() {
         const val KEY_UNLOCK_DURATION_MS = "unlock_duration_ms"
         const val KEY_BYPASS_SECONDS = "bypass_seconds"
         const val KEY_IS_ENABLED = "blocking_enabled"
-        const val DEFAULT_UNLOCK_DURATION_MS = 10 * 60 * 1000L
+        const val KEY_BYPASS_ENABLED = "bypass_enabled"
+        /** Cards required for a temporary unlock (synced from Flutter block rule). */
+        const val KEY_UNLOCK_GOAL = "unlock_goal_cards"
+        const val DEFAULT_UNLOCK_DURATION_MS = 15 * 60 * 1000L
         const val DEFAULT_BYPASS_SECONDS = 60
+        const val DEFAULT_UNLOCK_GOAL = 10
 
         private fun unlockUntilKey(pkg: String) = "unlock_until_$pkg"
 
@@ -113,7 +119,8 @@ class AppMonitorService : Service() {
             bypassSeconds: Int,
             isEnabled: Boolean = true,
             studyMode: String = STUDY_MODE_CARD_COUNT,
-            blockingMode: String = BLOCKING_MODE_SELECTED,
+            unlockGoal: Int = DEFAULT_UNLOCK_GOAL,
+            bypassEnabled: Boolean = true,
         ) {
             val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             val unlockMs = (unlockDurationMinutes.coerceAtLeast(1) * 60 * 1000L)
@@ -122,49 +129,28 @@ class AppMonitorService : Service() {
             } else {
                 STUDY_MODE_CARD_COUNT
             }
-            val blockMode = if (blockingMode == BLOCKING_MODE_LOCKDOWN) {
-                BLOCKING_MODE_LOCKDOWN
-            } else {
-                BLOCKING_MODE_SELECTED
-            }
-            val allowlist = buildDefaultAllowlist(context)
             prefs.edit()
                 .putLong(KEY_UNLOCK_DURATION_MS, unlockMs)
                 .putInt(KEY_BYPASS_SECONDS, bypassSeconds.coerceAtLeast(1))
                 .putBoolean(KEY_IS_ENABLED, isEnabled)
                 .putString(KEY_STUDY_MODE, mode)
-                .putString(KEY_BLOCKING_MODE, blockMode)
-                .putString(KEY_ALLOWLIST, allowlist.joinToString("|"))
+                .putInt(KEY_UNLOCK_GOAL, unlockGoal.coerceAtLeast(1))
+                .putBoolean(KEY_BYPASS_ENABLED, bypassEnabled)
                 .apply()
         }
 
-        /** Packages always allowed during lockdown (study + phone). */
-        fun buildDefaultAllowlist(context: Context): List<String> {
-            val packages = linkedSetOf(
-                context.packageName,
-                ANKIDROID_PACKAGE,
-            )
-            packages.addAll(resolveDialerPackages(context))
-            return packages.toList()
+        fun unlockGoal(prefs: SharedPreferences): Int {
+            return prefs.getInt(KEY_UNLOCK_GOAL, DEFAULT_UNLOCK_GOAL).coerceAtLeast(1)
         }
 
-        private fun resolveDialerPackages(context: Context): Set<String> {
-            val found = linkedSetOf<String>()
-            try {
-                val dial = Intent(Intent.ACTION_DIAL)
-                val matches = context.packageManager.queryIntentActivities(dial, 0)
-                for (info in matches) {
-                    val pkg = info.activityInfo?.packageName ?: continue
-                    found.add(pkg)
-                }
-            } catch (_: Throwable) {
-            }
-            // Common OEM dialers as fallbacks.
-            found.add("com.google.android.dialer")
-            found.add("com.android.dialer")
-            found.add("com.samsung.android.dialer")
-            found.add("com.android.server.telecom")
-            return found
+        fun unlockGoal(context: Context): Int {
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            return unlockGoal(prefs)
+        }
+
+        fun isTemporarilyUnlocked(context: Context, pkg: String): Boolean {
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            return isPackageUnlocked(prefs, pkg)
         }
 
         fun isBlockingEnabled(context: Context): Boolean {
@@ -184,6 +170,29 @@ class AppMonitorService : Service() {
                 ?: prefs.getLong(KEY_UNLOCK_DURATION_MS, DEFAULT_UNLOCK_DURATION_MS)
             val until = System.currentTimeMillis() + duration.coerceAtLeast(1_000L)
             prefs.edit().putLong(unlockUntilKey(pkg), until).apply()
+        }
+
+        /** Temporary unlock for every currently blocked app (gate unlock grace). */
+        fun grantTempUnlockAllBlocked(
+            context: Context,
+            durationMs: Long? = null,
+        ) {
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val duration = durationMs
+                ?: prefs.getLong(KEY_UNLOCK_DURATION_MS, DEFAULT_UNLOCK_DURATION_MS)
+            val until = System.currentTimeMillis() + duration.coerceAtLeast(1_000L)
+            val blocked = (prefs.getString(KEY_BLOCKED, "") ?: "")
+                .split("|")
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+            if (blocked.isEmpty()) return
+            val editor = prefs.edit()
+            for (pkg in blocked) {
+                editor.putLong(unlockUntilKey(pkg), until)
+            }
+            // commit() so the next blocked-app open cannot race ahead of unlock.
+            editor.commit()
+            Log.i(TAG, "temp unlock all blocked (${blocked.size}) until=$until")
         }
 
         fun grantBypass(
@@ -290,6 +299,106 @@ class AppMonitorService : Service() {
             }
         }
 
+        fun peekStudyBoutCount(prefs: SharedPreferences): Int {
+            val last = prefs.getLong(KEY_STUDY_BOUT_LAST_MS, 0L)
+            if (last > 0 &&
+                System.currentTimeMillis() - last > STUDY_BOUT_IDLE_GAP_MS
+            ) {
+                return 0
+            }
+            return prefs.getInt(KEY_STUDY_BOUT_COUNT, 0).coerceAtLeast(0)
+        }
+
+        fun peekStudyBoutCount(context: Context): Int {
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            return peekStudyBoutCount(prefs)
+        }
+
+        fun recordStudyBoutCredit(prefs: SharedPreferences, delta: Int) {
+            if (delta <= 0) return
+            val now = System.currentTimeMillis()
+            val last = prefs.getLong(KEY_STUDY_BOUT_LAST_MS, 0L)
+            val current = if (last > 0 && now - last > STUDY_BOUT_IDLE_GAP_MS) {
+                0
+            } else {
+                prefs.getInt(KEY_STUDY_BOUT_COUNT, 0).coerceAtLeast(0)
+            }
+            prefs.edit()
+                .putInt(KEY_STUDY_BOUT_COUNT, current + delta)
+                .putLong(KEY_STUDY_BOUT_LAST_MS, now)
+                .apply()
+            Log.d(TAG, "study bout +$delta → ${current + delta}")
+        }
+
+        fun consumeStudyBout(prefs: SharedPreferences) {
+            prefs.edit()
+                .putInt(KEY_STUDY_BOUT_COUNT, 0)
+                .remove(KEY_STUDY_BOUT_LAST_MS)
+                .apply()
+        }
+
+        fun clearStudyBout(prefs: SharedPreferences) = consumeStudyBout(prefs)
+
+        /** Active gate/practice session progress for Flutter UI restore. */
+        fun getDelegatedSessionState(context: Context): Map<String, Any>? {
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val pkg = prefs.getString(KEY_DELEGATED_PKG, null) ?: return null
+            if (pkg.isBlank()) return null
+            val target = prefs.getInt(KEY_DELEGATED_TARGET, 0).coerceAtLeast(1)
+            val seeded = prefs.getInt(KEY_DELEGATED_SEEDED, 0).coerceAtLeast(0)
+            val reps = prefs.getInt(KEY_DELEGATED_LAST_REPS, 0).coerceAtLeast(0)
+            val completed = (seeded + reps).coerceAtMost(target)
+            return mapOf(
+                "packageName" to pkg,
+                "appName" to (prefs.getString(KEY_DELEGATED_APP_NAME, pkg) ?: pkg),
+                "target" to target,
+                "seeded" to seeded,
+                "completed" to completed,
+            )
+        }
+
+        fun peekStudyBoutCountPublic(context: Context): Int {
+            return peekStudyBoutCount(context)
+        }
+
+        /**
+         * If a recent study bout already meets [target], grant temp unlock and
+         * return true. Used when a blocked app is opened before Study is tapped.
+         */
+        fun tryUnlockFromRecentBout(
+            context: Context,
+            packageName: String,
+            appName: String,
+            target: Int,
+        ): Boolean {
+            if (packageName == PRACTICE_PACKAGE) return false
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val safeTarget = target.coerceAtLeast(1)
+            val bout = peekStudyBoutCount(prefs)
+            if (bout < safeTarget) return false
+            Log.i(TAG, "bout gate auto-unlock bout=$bout target=$safeTarget")
+            consumeStudyBout(prefs)
+            grantTempUnlockAllBlocked(context)
+            clearDelegatedSession(context)
+            // Best-effort UI sync — unlock already committed in prefs.
+            MainActivity.notifyFlutter(
+                "onDelegatedUnlock",
+                mapOf("cardsCompleted" to safeTarget),
+            )
+            runningInstance?.showUnlockOverlay(
+                appName = appName,
+                packageName = packageName,
+                cardsCompleted = safeTarget,
+            )
+            return true
+        }
+
+        /**
+         * Starts a delegated study session, or immediately unlocks when a recent
+         * study bout already meets [target] (gate packages only).
+         *
+         * @return map with `unlocked` (Boolean), `seeded` (Int), `target` (Int)
+         */
         fun startDelegatedSession(
             context: Context,
             packageName: String,
@@ -297,9 +406,54 @@ class AppMonitorService : Service() {
             deckId: Long,
             deckIds: List<Long>,
             target: Int,
-            baseline: Int,
-        ) {
+        ): Map<String, Any> {
             val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val safeTarget = target.coerceAtLeast(1)
+            val isPractice = packageName == PRACTICE_PACKAGE
+            val bout = peekStudyBoutCount(prefs)
+
+            if (!isPractice && bout >= safeTarget) {
+                tryUnlockFromRecentBout(context, packageName, appName, safeTarget)
+                return mapOf(
+                    "unlocked" to true,
+                    "seeded" to safeTarget,
+                    "target" to safeTarget,
+                )
+            }
+
+            val seed = if (isPractice) 0 else bout.coerceAtMost(safeTarget)
+
+            // Resume only a matching *gate* session — never treat home practice
+            // progress as unlock progress for a blocked app.
+            val existingPkg = prefs.getString(KEY_DELEGATED_PKG, null)
+            if (!isPractice &&
+                existingPkg == packageName &&
+                existingPkg != PRACTICE_PACKAGE &&
+                prefs.getInt(KEY_DELEGATED_TARGET, 0) == safeTarget
+            ) {
+                val existingSeeded = prefs.getInt(KEY_DELEGATED_SEEDED, 0)
+                val existingReps = prefs.getInt(KEY_DELEGATED_LAST_REPS, 0)
+                val existingCompleted =
+                    (existingSeeded + existingReps).coerceAtMost(safeTarget)
+                if (existingCompleted > 0 && existingCompleted < safeTarget) {
+                    Log.i(
+                        TAG,
+                        "delegated resume pkg=$packageName " +
+                            "completed=$existingCompleted/$safeTarget",
+                    )
+                    runningInstance?.onDelegatedSessionSeeded(existingCompleted)
+                    return mapOf(
+                        "unlocked" to false,
+                        "seeded" to existingCompleted,
+                        "target" to safeTarget,
+                    )
+                }
+            }
+
+            // Replacing practice (or any other) session — wipe trackers so gate
+            // counting starts clean; bout seed carries recent study credit.
+            runningInstance?.resetDelegatedTrackers()
+
             prefs.edit()
                 .putString(KEY_DELEGATED_PKG, packageName)
                 .putString(KEY_DELEGATED_APP_NAME, appName)
@@ -308,12 +462,22 @@ class AppMonitorService : Service() {
                     KEY_DELEGATED_DECK_IDS,
                     deckIds.joinToString(","),
                 )
-                .putInt(KEY_DELEGATED_TARGET, target)
-                .putInt(KEY_DELEGATED_BASELINE, baseline)
+                .putInt(KEY_DELEGATED_TARGET, safeTarget)
+                .putInt(KEY_DELEGATED_SEEDED, seed)
+                .putInt(KEY_DELEGATED_LAST_REPS, 0)
                 .putInt(KEY_DELEGATED_COMPLETE_STREAK, 0)
                 .putLong(KEY_DELEGATED_STARTED_AT, System.currentTimeMillis())
                 .remove(KEY_DELEGATED_CARD_KEYS)
-                .apply()
+                .remove(KEY_DELEGATED_BASELINE)
+                .commit()
+
+            runningInstance?.onDelegatedSessionSeeded(seed)
+            Log.i(TAG, "delegated start pkg=$packageName seed=$seed target=$safeTarget")
+            return mapOf(
+                "unlocked" to false,
+                "seeded" to seed,
+                "target" to safeTarget,
+            )
         }
 
         fun cancelDelegatedSession(context: Context) {
@@ -332,6 +496,8 @@ class AppMonitorService : Service() {
                 .remove(KEY_DELEGATED_CARD_KEYS)
                 .remove(KEY_DELEGATED_COMPLETE_STREAK)
                 .remove(KEY_DELEGATED_STARTED_AT)
+                .remove(KEY_DELEGATED_SEEDED)
+                .remove(KEY_DELEGATED_LAST_REPS)
                 .apply()
             runningInstance?.onDelegatedSessionEnded()
         }
@@ -359,6 +525,8 @@ class AppMonitorService : Service() {
     private val keyTrackers = mutableMapOf<String, AnkiDroidApi.KeyTracker>()
     private val passiveKeyTrackers = mutableMapOf<String, AnkiDroidApi.KeyTracker>()
     private var lastReportedProgress = -1
+    /** In-memory streak — prefs apply() can lose increments across 500ms polls. */
+    private var delegatedCompleteStreak = 0
     private var lastPassiveWatching = false
 
     private val pollRunnable = object : Runnable {
@@ -384,6 +552,7 @@ class AppMonitorService : Service() {
         prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         overlayManager = CompletionOverlayManager(this)
         ankiApi = AnkiDroidApi(applicationContext)
+        AnkiBlockApplication.warmFlutterEngine(application as android.app.Application)
         createChannels()
         clearStaleDelegatedSession()
         repairPassiveMergeState()
@@ -435,9 +604,15 @@ class AppMonitorService : Service() {
         }
         if (intent?.action == ACTION_DELEGATED_START) {
             currentForegroundPackage = ANKIDROID_PACKAGE
-            prefs.edit().remove(KEY_DELEGATED_CARD_KEYS).apply()
-            keyTrackers.clear()
-            lastReportedProgress = -1
+            val hasProgress = prefs.getInt(KEY_DELEGATED_LAST_REPS, 0) > 0 ||
+                !prefs.getString(KEY_DELEGATED_CARD_KEYS, null).isNullOrBlank()
+            if (!hasProgress) {
+                // Fresh session only — never wipe an in-progress snapshot/reps.
+                prefs.edit().remove(KEY_DELEGATED_CARD_KEYS).apply()
+                keyTrackers.clear()
+                delegatedCompleteStreak = 0
+                lastReportedProgress = prefs.getInt(KEY_DELEGATED_SEEDED, 0)
+            }
             Log.i(TAG, "delegated session started — expecting AnkiDroid foreground")
         }
         return START_STICKY
@@ -494,15 +669,47 @@ class AppMonitorService : Service() {
 
     private fun onDelegatedSessionEnded() {
         lastReportedProgress = -1
+        delegatedCompleteStreak = 0
         resetForegroundNotification()
+    }
+
+    private fun onDelegatedSessionSeeded(seed: Int) {
+        // Flutter applies seed from startDelegatedSession result; avoid a
+        // progress event that would double-count cards already in today's ledger.
+        lastReportedProgress = seed
+        delegatedCompleteStreak = 0
+    }
+
+    private fun resetDelegatedTrackers() {
+        keyTrackers.clear()
+        lastReportedProgress = -1
+        delegatedCompleteStreak = 0
+    }
+
+    private fun showUnlockOverlay(
+        appName: String,
+        packageName: String,
+        cardsCompleted: Int,
+    ) {
+        overlayManager.show(
+            appName = appName,
+            packageName = packageName,
+            cardsCompleted = cardsCompleted,
+            onDismiss = { },
+        )
     }
 
     private fun reportProgressIfChanged(completed: Int, target: Int) {
         if (completed == lastReportedProgress) return
         lastReportedProgress = completed
+        val pkg = prefs.getString(KEY_DELEGATED_PKG, "") ?: ""
         MainActivity.notifyFlutter(
             "onDelegatedProgress",
-            mapOf("completed" to completed, "target" to target),
+            mapOf(
+                "completed" to completed,
+                "target" to target,
+                "packageName" to pkg,
+            ),
         )
     }
 
@@ -629,6 +836,7 @@ class AppMonitorService : Service() {
             .putInt(KEY_DAILY_REVIEWED, newDaily)
             .putInt(KEY_PASSIVE_APPLIED_TO_DAILY, passiveTotal)
             .apply()
+        recordStudyBoutCredit(prefs, delta)
 
         Log.i(TAG, "passive study +$delta cards (daily=$newDaily passiveTotal=$passiveTotal)")
 
@@ -661,6 +869,7 @@ class AppMonitorService : Service() {
             .putInt(KEY_PASSIVE_CREDITED_TOTAL, 0)
             .putInt(KEY_PASSIVE_APPLIED_TO_DAILY, 0)
             .apply()
+        clearStudyBout(prefs)
     }
 
     private fun consolidatePassiveTrackers() {
@@ -683,33 +892,20 @@ class AppMonitorService : Service() {
         return emptyList()
     }
 
-    private fun aggregateDeckDueTotal(api: AnkiDroidApi, deckIds: List<Long>): Int {
+    private fun aggregateDeckObligationDue(api: AnkiDroidApi, deckIds: List<Long>): Int {
         var total = 0
         for (deckId in deckIds) {
             total += try {
-                api.deckDueTotal(deckId)
+                api.deckObligationDue(deckId)
             } catch (e: Exception) {
-                Log.w(TAG, "due-count for deck=$deckId failed", e)
+                Log.w(TAG, "obligation-due for deck=$deckId failed", e)
                 0
             }
         }
         return total
     }
 
-    private fun aggregateDeckObligationTotal(api: AnkiDroidApi, deckIds: List<Long>): Int {
-        var total = 0
-        for (deckId in deckIds) {
-            total += try {
-                api.deckObligationTotal(deckId)
-            } catch (e: Exception) {
-                Log.w(TAG, "obligation-count for deck=$deckId failed", e)
-                0
-            }
-        }
-        return total
-    }
-
-    /** Mode-aware goal: card count, or Anki learn+review cleared (excludes new). */
+    /** Mode-aware goal: card count, or Anki learning+reviews cleared. */
     private fun isBlockingGoalComplete(): Boolean {
         val mode = prefs.getString(KEY_STUDY_MODE, STUDY_MODE_CARD_COUNT)
             ?: STUDY_MODE_CARD_COUNT
@@ -719,9 +915,9 @@ class AppMonitorService : Service() {
             val deckIds = parseScopeDeckIds(prefs.getString(KEY_SCOPE_DECK_IDS, null))
             if (deckIds.isEmpty()) return false
             return try {
-                aggregateDeckObligationTotal(api, deckIds) <= 0
+                aggregateDeckObligationDue(api, deckIds) <= 0
             } catch (e: Exception) {
-                Log.w(TAG, "obligation-goal check failed", e)
+                Log.w(TAG, "due-goal check failed", e)
                 false
             }
         }
@@ -792,23 +988,10 @@ class AppMonitorService : Service() {
             }
         }
         if (activePkg == null) return
-        if (activePkg != ANKIDROID_PACKAGE) {
-            prefs.edit().putInt(KEY_DELEGATED_COMPLETE_STREAK, 0).apply()
-            val startedAt = prefs.getLong(KEY_DELEGATED_STARTED_AT, 0L)
-            if (startedAt > 0 &&
-                System.currentTimeMillis() - startedAt > 10 * 60 * 1000L
-            ) {
-                Log.i(TAG, "clearing abandoned delegated session — left AnkiDroid")
-                clearDelegatedSession(this)
-                keyTrackers.clear()
-            }
-            return
-        }
 
         val pkg = prefs.getString(KEY_DELEGATED_PKG, null) ?: return
         val appName = prefs.getString(KEY_DELEGATED_APP_NAME, pkg) ?: pkg
         val target = prefs.getInt(KEY_DELEGATED_TARGET, 5)
-        val baseline = prefs.getInt(KEY_DELEGATED_BASELINE, 0)
         val deckIds = resolveDelegatedDeckIds()
         if (deckIds.isEmpty()) return
 
@@ -818,6 +1001,11 @@ class AppMonitorService : Service() {
             return
         }
 
+        val inAnki = activePkg == ANKIDROID_PACKAGE
+
+        // Always refresh snapshot / progress while a session exists — including
+        // when the user just left Anki after the last card (otherwise unlock
+        // never finalizes and the gate reappears with a cleared Flutter session).
         ensureMultiDeckSnapshot(
             api,
             deckIds,
@@ -838,47 +1026,89 @@ class AppMonitorService : Service() {
             ?.filter { it.isNotBlank() }
             ?: emptyList()
 
-        val repsBased = if (initialKeys.isNotEmpty()) {
+        val seeded = prefs.getInt(KEY_DELEGATED_SEEDED, 0).coerceAtLeast(0)
+        val repsBased = if (initialKeys.isEmpty()) {
+            if (inAnki) {
+                Log.d(TAG, "delegated waiting for schedule snapshot decks=$deckIds")
+            }
+            0
+        } else {
             try {
                 api.countValidReviews(initialKeys, keyTrackers)
             } catch (e: Exception) {
                 Log.w(TAG, "reps poll failed", e)
                 0
             }
+        }
+        val prevReps = prefs.getInt(KEY_DELEGATED_LAST_REPS, 0)
+        // Prefer live credited reps; fall back to persisted last reps after
+        // service restart (in-memory trackers are re-seeded at current baselines).
+        val effectiveReps = maxOf(repsBased, prevReps)
+        if (repsBased > prevReps) {
+            val delta = repsBased - prevReps
+            recordStudyBoutCredit(prefs, delta)
+            val newDaily = prefs.getInt(KEY_DAILY_REVIEWED, 0) + delta
+            prefs.edit()
+                .putInt(KEY_DAILY_REVIEWED, newDaily)
+                .putInt(KEY_DELEGATED_LAST_REPS, repsBased)
+                .commit()
+        }
+        val completed = (seeded + effectiveReps).coerceAtMost(target)
+
+        if (completed >= target) {
+            delegatedCompleteStreak += 1
         } else {
-            0
+            delegatedCompleteStreak = 0
         }
+        prefs.edit().putInt(KEY_DELEGATED_COMPLETE_STREAK, delegatedCompleteStreak).apply()
 
-        val currentDue = try {
-            aggregateDeckDueTotal(api, deckIds)
-        } catch (e: Exception) {
-            Log.w(TAG, "due-count poll failed", e)
-            baseline
+        if (inAnki || completed > lastReportedProgress) {
+            reportProgressIfChanged(completed, target)
         }
-        val dueBased = (baseline - currentDue).coerceAtLeast(0)
-        val completed = maxOf(repsBased, dueBased).coerceAtMost(target)
-
-        val streak = if (completed >= target) {
-            prefs.getInt(KEY_DELEGATED_COMPLETE_STREAK, 0) + 1
-        } else {
-            0
-        }
-        prefs.edit().putInt(KEY_DELEGATED_COMPLETE_STREAK, streak).apply()
-
-        reportProgressIfChanged(completed, target)
 
         Log.d(
             TAG,
-            "poll fg=$activePkg completed=$completed/$target (reps=$repsBased due=$dueBased) " +
-                "streak=$streak snapshot=${initialKeys.size} keys baseline=$baseline now=$currentDue " +
-                "decks=$deckIds",
+            "poll fg=$activePkg completed=$completed/$target " +
+                "seed=$seeded reps=$effectiveReps streak=$delegatedCompleteStreak " +
+                "snapshot=${initialKeys.size} keys decks=$deckIds",
         )
 
-        if (completed < target) return
-        if (streak < 2) return
+        if (completed >= target && delegatedCompleteStreak >= 1) {
+            finalizeDelegatedUnlock(
+                pkg = pkg,
+                appName = appName,
+                completed = completed,
+            )
+            return
+        }
 
+        if (!inAnki) {
+            val startedAt = prefs.getLong(KEY_DELEGATED_STARTED_AT, 0L)
+            if (startedAt > 0 &&
+                System.currentTimeMillis() - startedAt > 10 * 60 * 1000L
+            ) {
+                Log.i(TAG, "clearing abandoned delegated session — left AnkiDroid")
+                clearDelegatedSession(this)
+                keyTrackers.clear()
+            }
+        }
+    }
+
+    private fun finalizeDelegatedUnlock(
+        pkg: String,
+        appName: String,
+        completed: Int,
+    ) {
         Log.i(TAG, "session complete — $completed cards for $appName")
         keyTrackers.clear()
+        if (pkg != PRACTICE_PACKAGE) {
+            consumeStudyBout(prefs)
+        }
+        // Grant unlock BEFORE notifying Flutter / dismissing UI so a quick
+        // return to the blocked app cannot race an empty unlock window.
+        if (pkg != PRACTICE_PACKAGE) {
+            grantTempUnlockAllBlocked(this)
+        }
         clearDelegatedSession(this)
         dismissGateUi(this)
         MainActivity.notifyFlutter(
@@ -890,7 +1120,6 @@ class AppMonitorService : Service() {
             return
         }
 
-        grantTempUnlock(this, pkg)
         overlayManager.show(
             appName = appName,
             packageName = pkg,
@@ -926,7 +1155,11 @@ class AppMonitorService : Service() {
         lastForegroundPackage = pkg
 
         if (!AppMonitorService.isBlockingEnabled(this)) return
-        if (!shouldGatePackage(pkg)) return
+
+        val blockedCsv = prefs.getString(KEY_BLOCKED, "") ?: ""
+        if (blockedCsv.isEmpty()) return
+        val blocked = blockedCsv.split("|").filter { it.isNotEmpty() }.toSet()
+        if (pkg !in blocked) return
 
         if (isBlockingGoalComplete()) return
         if (isPackageUnlocked(prefs, pkg)) return
@@ -937,7 +1170,19 @@ class AppMonitorService : Service() {
         lastTriggerTimes[pkg] = now
 
         val displayName = lookupDisplayName(pkg) ?: pkg
-        launchGate(pkg, displayName)
+        // Pure-native bout unlock — do not wait for Flutter MainActivity.
+        if (tryUnlockFromRecentBout(
+                this,
+                pkg,
+                displayName,
+                unlockGoal(prefs),
+            )
+        ) {
+            Log.i(TAG, "skipped gate — recent study bout unlocked $displayName")
+            return
+        }
+
+        launchFlutterGate(pkg, displayName)
     }
 
     private fun checkExpiredUnlockWhileForeground(foreground: String?) {
@@ -945,7 +1190,11 @@ class AppMonitorService : Service() {
         if (pkg == packageName) return
 
         if (!AppMonitorService.isBlockingEnabled(this)) return
-        if (!shouldGatePackage(pkg)) return
+
+        val blockedCsv = prefs.getString(KEY_BLOCKED, "") ?: ""
+        if (blockedCsv.isEmpty()) return
+        val blocked = blockedCsv.split("|").filter { it.isNotEmpty() }.toSet()
+        if (pkg !in blocked) return
 
         if (isBlockingGoalComplete()) return
         if (!hadUnlockThatExpired(prefs, pkg)) return
@@ -957,31 +1206,7 @@ class AppMonitorService : Service() {
 
         val displayName = lookupDisplayName(pkg) ?: pkg
         prefs.edit().remove(unlockUntilKey(pkg)).apply()
-        launchGate(pkg, displayName)
-    }
-
-    /** Selected-apps: blocklist. Lockdown: everything except allowlist. */
-    private fun shouldGatePackage(pkg: String): Boolean {
-        val mode = prefs.getString(KEY_BLOCKING_MODE, BLOCKING_MODE_SELECTED)
-            ?: BLOCKING_MODE_SELECTED
-        if (mode == BLOCKING_MODE_LOCKDOWN) {
-            if (pkg == ANKIDROID_PACKAGE) return false
-            val allowCsv = prefs.getString(KEY_ALLOWLIST, "") ?: ""
-            val allow = allowCsv.split("|").filter { it.isNotEmpty() }.toSet()
-            if (allow.isEmpty()) {
-                // Safety: rebuild default allowlist if prefs were wiped.
-                val rebuilt = buildDefaultAllowlist(this)
-                prefs.edit()
-                    .putString(KEY_ALLOWLIST, rebuilt.joinToString("|"))
-                    .apply()
-                return pkg !in rebuilt
-            }
-            return pkg !in allow
-        }
-        val blockedCsv = prefs.getString(KEY_BLOCKED, "") ?: ""
-        if (blockedCsv.isEmpty()) return false
-        val blocked = blockedCsv.split("|").filter { it.isNotEmpty() }.toSet()
-        return pkg in blocked
+        launchFlutterGate(pkg, displayName)
     }
 
     private fun lookupDisplayName(pkg: String): String? {
@@ -995,7 +1220,7 @@ class AppMonitorService : Service() {
         return null
     }
 
-    private fun launchGate(pkg: String, displayName: String) {
+    private fun launchFlutterGate(pkg: String, displayName: String) {
         val intent = Intent(this, MainActivity::class.java).apply {
             action = MainActivity.ACTION_OPEN_GATE
             putExtra("packageName", pkg)
@@ -1007,7 +1232,7 @@ class AppMonitorService : Service() {
         try {
             startActivity(intent)
         } catch (e: Throwable) {
-            Log.w(TAG, "gate launch failed for $displayName", e)
+            Log.w(TAG, "Flutter gate launch failed for $displayName", e)
         }
     }
 }

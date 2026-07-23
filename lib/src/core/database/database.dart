@@ -32,9 +32,9 @@ class BlockRules extends Table {
   IntColumn get cardsRequired => integer().withDefault(const Constant(10))();
   IntColumn get dailyCardsGoal => integer().withDefault(const Constant(30))();
   IntColumn get unlockDurationMinutes =>
-      integer().withDefault(const Constant(10))();
+      integer().withDefault(const Constant(15))();
   BoolColumn get bypassEnabled => boolean().withDefault(const Constant(true))();
-  IntColumn get bypassDailyCap => integer().withDefault(const Constant(2))();
+  IntColumn get bypassDailyCap => integer().withDefault(const Constant(3))();
   IntColumn get bypassSeconds => integer().withDefault(const Constant(60))();
   /// `dueCards` | `cardCount`. Fresh installs use dueCards; upgrades keep cardCount.
   TextColumn get studyMode =>
@@ -44,9 +44,6 @@ class BlockRules extends Table {
       text().withDefault(const Constant('off'))();
   IntColumn get settingsUnlockMinutes =>
       integer().withDefault(const Constant(10))();
-  /// `selectedApps` | `lockdown`.
-  TextColumn get blockingMode =>
-      text().withDefault(const Constant('selectedApps'))();
   BoolColumn get isEnabled => boolean().withDefault(const Constant(true))();
   IntColumn get updatedAt =>
       integer().withDefault(Constant(DateTime.now().millisecondsSinceEpoch))();
@@ -100,28 +97,33 @@ class AppDatabase extends _$AppDatabase {
   }
 
   @override
-  int get schemaVersion => 9;
+  int get schemaVersion => 10;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
         onCreate: (m) async {
           await m.createAll();
-          // Fresh installs: Anki-queue study mode + phone lockdown.
+          // Fresh installs default to due-cards mode.
           await into(blockRules).insert(
             BlockRulesCompanion.insert(
               id: const Value(1),
               studyMode: const Value('dueCards'),
-              blockingMode: const Value('lockdown'),
+              bypassDailyCap: const Value(3),
+              unlockDurationMinutes: const Value(15),
             ),
             mode: InsertMode.insertOrIgnore,
           );
         },
         onUpgrade: (m, from, to) async {
-          if (from < 9) {
+          if (from < 10) {
+            // New default unlock grace is 15m; bump users still on the old 10m default.
             await m.database.customStatement(
-              "ALTER TABLE block_rules "
-              "ADD COLUMN blocking_mode TEXT NOT NULL DEFAULT 'selectedApps'",
+              'UPDATE block_rules SET unlock_duration_minutes = 15 '
+              'WHERE unlock_duration_minutes = 10',
             );
+          }
+          if (from < 9) {
+            // New installs already use 3; leave existing user caps unchanged.
           }
           if (from < 8) {
             await m.database.customStatement(

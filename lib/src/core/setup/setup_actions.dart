@@ -41,17 +41,6 @@ Future<void> updateStudyMode(WidgetRef ref, String mode) async {
   await syncBlockRuleToNative(ref);
 }
 
-Future<void> updateBlockingMode(WidgetRef ref, String mode) async {
-  final db = ref.read(databaseProvider);
-  await db.updateBlockRule(BlockRulesCompanion(
-    id: const Value(1),
-    blockingMode: Value(mode),
-    updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
-  ));
-  ref.invalidate(blockRuleProvider);
-  await syncBlockRuleToNative(ref);
-}
-
 Future<void> updateSettingsProtection(
   WidgetRef ref, {
   String? protection,
@@ -72,11 +61,12 @@ Future<void> updateSettingsProtection(
 Future<void> syncBlockRuleToNative(WidgetRef ref) async {
   final rule = await ref.read(blockRuleProvider.future);
   await ref.read(appsServiceProvider).syncBlockRuleSettings(
-        unlockDurationMinutes: rule?.unlockDurationMinutes ?? 10,
-        bypassSeconds: rule?.bypassSeconds ?? 60,
+        unlockDurationMinutes: rule?.unlockDurationMinutes ?? 15,
+        bypassSeconds: kBypassSeconds,
         isEnabled: rule?.isEnabled ?? true,
         studyMode: rule?.studyMode ?? 'cardCount',
-        blockingMode: rule?.blockingMode ?? 'selectedApps',
+        unlockGoal: rule?.cardsRequired ?? 10,
+        bypassEnabled: rule?.bypassEnabled ?? true,
       );
 }
 
@@ -124,12 +114,10 @@ Future<void> mergeDailyFromNative(WidgetRef ref) async {
 }
 
 Future<void> ensureAppMonitorRunning(WidgetRef ref) async {
-  final rule = await ref.read(blockRuleProvider.future);
-  final mode = BlockingMode.fromStorage(rule?.blockingMode);
   final blocked =
       await ref.read(databaseProvider).watchActiveBlockedApps().first;
   final svc = ref.read(appsServiceProvider);
-  if (mode == BlockingMode.lockdown || blocked.isNotEmpty) {
+  if (blocked.isNotEmpty) {
     await svc.startAppMonitor();
   } else {
     await svc.stopAppMonitor();

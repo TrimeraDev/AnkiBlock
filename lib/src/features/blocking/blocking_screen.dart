@@ -57,9 +57,6 @@ class _BlockingScreenState extends ConsumerState<BlockingScreen>
   Widget build(BuildContext context) {
     final appsAsync = ref.watch(installedAppsProvider);
     final blockedAsync = ref.watch(blockedAppsProvider);
-    final ruleAsync = ref.watch(blockRuleProvider);
-    final blockingMode =
-        BlockingMode.fromStorage(ruleAsync.valueOrNull?.blockingMode);
     final loadingApps = appsAsync.isLoading;
     final refreshingApps = appsAsync.isLoading && appsAsync.hasValue;
 
@@ -71,85 +68,42 @@ class _BlockingScreenState extends ConsumerState<BlockingScreen>
           onPressed: () => context.pop(),
         ),
         actions: [
-          if (blockingMode == BlockingMode.selectedApps)
-            IconButton(
-              icon: loadingApps
-                  ? const SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.refresh),
-              tooltip: 'Refresh',
-              onPressed: loadingApps
-                  ? null
-                  : () => ref.read(installedAppsProvider.notifier).refresh(),
-            ),
-          if (blockingMode == BlockingMode.selectedApps)
-            PopupMenuButton<_SortMode>(
-              icon: const Icon(Icons.sort),
-              onSelected: (m) => setState(() => _sort = m),
-              itemBuilder: (_) => const [
-                PopupMenuItem(
-                  value: _SortMode.usage,
-                  child: Text('Sort by screen time'),
-                ),
-                PopupMenuItem(
-                    value: _SortMode.name, child: Text('Sort by name')),
-              ],
-            ),
-        ],
-      ),
-      body: Column(
-        children: [
-          _BlockingModePicker(
-            mode: blockingMode,
-            onChanged: (m) => _setBlockingMode(m),
+          IconButton(
+            icon: loadingApps
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh),
+            tooltip: 'Refresh',
+            onPressed: loadingApps
+                ? null
+                : () => ref.read(installedAppsProvider.notifier).refresh(),
           ),
-          Expanded(
-            child: blockingMode == BlockingMode.lockdown
-                ? const _LockdownBody()
-                : appsAsync.when(
-                    skipLoadingOnRefresh: true,
-                    loading: () => const _BlockingLoadingBody(),
-                    error: (e, _) => _ErrorView(
-                        error: e,
-                        onRetry: () {
-                          ref.read(installedAppsProvider.notifier).refresh();
-                        }),
-                    data: (apps) => _buildSelectedAppsBody(
-                      apps: apps,
-                      blockedAsync: blockedAsync,
-                      refreshingApps: refreshingApps,
-                    ),
-                  ),
+          PopupMenuButton<_SortMode>(
+            icon: const Icon(Icons.sort),
+            onSelected: (m) => setState(() => _sort = m),
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                value: _SortMode.usage,
+                child: Text('Sort by screen time'),
+              ),
+              PopupMenuItem(value: _SortMode.name, child: Text('Sort by name')),
+            ],
           ),
         ],
       ),
-    );
-  }
-
-  Future<void> _setBlockingMode(BlockingMode next) async {
-    final rule = ref.read(blockRuleProvider).valueOrNull;
-    final current = BlockingMode.fromStorage(rule?.blockingMode);
-    if (current == next) return;
-    if (isWeakeningBlockingMode(current: current, proposed: next)) {
-      final ok = await ref
-          .read(settingsProtectionServiceProvider)
-          .requestProtectedEdit(
-            context,
-            kind: ProtectedEditKind.weakenBlockingMode,
-          );
-      if (!ok) return;
-    }
-    await updateBlockingMode(ref, next.storageValue);
-  }
-
-  Widget _buildSelectedAppsBody({
-    required List<InstalledApp> apps,
-    required AsyncValue<List<BlockedApp>> blockedAsync,
-    required bool refreshingApps,
-  }) {
+      body: appsAsync.when(
+        // Cached list stays visible while a background refresh runs.
+        skipLoadingOnRefresh: true,
+        loading: () => const _BlockingLoadingBody(),
+        error: (e, _) => _ErrorView(
+            error: e,
+            onRetry: () {
+              ref.read(installedAppsProvider.notifier).refresh();
+            }),
+        data: (apps) {
           final blockedRecords = (blockedAsync.valueOrNull ?? const <BlockedApp>[])
               .where((b) => b.isBlocked)
               .toList();
@@ -263,6 +217,9 @@ class _BlockingScreenState extends ConsumerState<BlockingScreen>
               ),
             ],
           );
+        },
+      ),
+    );
   }
 
   Future<void> _toggleBlock(InstalledApp app, bool blocked) async {
@@ -639,95 +596,6 @@ class _ErrorView extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _BlockingModePicker extends StatelessWidget {
-  final BlockingMode mode;
-  final ValueChanged<BlockingMode> onChanged;
-
-  const _BlockingModePicker({
-    required this.mode,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-      child: SegmentedButton<BlockingMode>(
-        segments: const [
-          ButtonSegment(
-            value: BlockingMode.selectedApps,
-            label: Text('Selected apps'),
-            icon: Icon(Icons.apps, size: 18),
-          ),
-          ButtonSegment(
-            value: BlockingMode.lockdown,
-            label: Text('Lock down'),
-            icon: Icon(Icons.phonelink_lock, size: 18),
-          ),
-        ],
-        selected: {mode},
-        onSelectionChanged: (s) {
-          if (s.isNotEmpty) onChanged(s.first);
-        },
-      ),
-    );
-  }
-}
-
-class _LockdownBody extends StatelessWidget {
-  const _LockdownBody();
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-      children: [
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Phone lockdown',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Most apps stay locked until you finish learning & reviews '
-                  'in AnkiDroid. You can still open AnkiBlock, AnkiDroid, and '
-                  'the Phone app.',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  'Always allowed',
-                  style: Theme.of(context).textTheme.labelLarge,
-                ),
-                const SizedBox(height: 6),
-                const Text('· AnkiBlock'),
-                const Text('· AnkiDroid'),
-                const Text('· Phone / dialer'),
-                const SizedBox(height: 12),
-                Text(
-                  'Emergency calls are always available. Settings and browsers '
-                  'are not fully locked — this is a focus tool, not parental '
-                  'control.',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppTheme.onSurfaceVariant,
-                      ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
     );
   }
 }

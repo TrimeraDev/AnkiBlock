@@ -10,9 +10,8 @@ import '../../core/theme/app_theme.dart';
 
 /// Connection page for the AnkiDroid bridge.
 ///
-/// Manages the install / permission / "we are connected" states. Per-deck
-/// scope selection lives on [/decks] — this screen just links there once
-/// the connection is healthy.
+/// Manages the install / permission / "we are connected" states. Deck scope
+/// is managed from the home screen.
 class AnkiDroidScreen extends ConsumerWidget {
   const AnkiDroidScreen({super.key});
 
@@ -95,16 +94,6 @@ class _Body extends ConsumerWidget {
             onTap: () => ref.read(ankiDroidServiceProvider).openAnkiDroid(),
           ),
         ] else ...[
-          const _SectionHeader(label: 'Decks'),
-          ListTile(
-            leading: const Icon(Icons.folder_outlined),
-            title: const Text('Manage deck scope'),
-            subtitle: const Text(
-              'Choose which AnkiDroid decks count toward your queue and gate.',
-            ),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => context.push('/decks'),
-          ),
           ListTile(
             leading: const Icon(Icons.open_in_new),
             title: const Text('Open AnkiDroid'),

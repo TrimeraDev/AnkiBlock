@@ -56,7 +56,7 @@ class _PermissionsScreenState extends ConsumerState<PermissionsScreen>
     final status = _status;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Permissions'),
+        title: const Text('Permissions & AnkiDroid'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.pop(),
@@ -77,6 +77,7 @@ class _PermissionsScreenState extends ConsumerState<PermissionsScreen>
                         'automatically after reboot, but you can reopen AnkiBlock '
                         'to force a restart.',
                   ),
+                const _SectionHeader(label: 'Blocking'),
                 _PermissionTile(
                   icon: Icons.visibility_outlined,
                   title: 'Usage Access',
@@ -100,6 +101,17 @@ class _PermissionsScreenState extends ConsumerState<PermissionsScreen>
                       'or when the app is in the background.',
                   granted: status.batteryUnrestricted,
                   onRequest: svc.requestBatteryOptimizationExemption,
+                ),
+                const Divider(height: 32),
+                const _SectionHeader(label: 'AnkiDroid'),
+                ListTile(
+                  leading: const Icon(Icons.sync),
+                  title: const Text('AnkiDroid sync'),
+                  subtitle: const Text(
+                    'Connection status, database access, and open AnkiDroid.',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => context.push('/ankidroid'),
                 ),
                 const Divider(height: 32),
                 Padding(
@@ -140,6 +152,25 @@ class _PermissionsScreenState extends ConsumerState<PermissionsScreen>
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  final String label;
+  const _SectionHeader({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+      child: Text(
+        label.toUpperCase(),
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: AppTheme.onSurfaceVariant,
+              letterSpacing: 1,
+            ),
+      ),
+    );
   }
 }
 

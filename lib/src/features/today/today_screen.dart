@@ -44,7 +44,6 @@ class TodayScreen extends ConsumerWidget {
     final reviewed = dailyStatsAsync.valueOrNull?.cardsReviewed ?? 0;
     final counts = countsAsync.valueOrNull ?? AnkiDroidCounts.zero;
     final obligation = counts.obligationDue;
-    final studyable = counts.studyable;
     final goalComplete = isBlockingGoalComplete(
       mode: mode,
       dailyCardsGoal: dailyGoal,
@@ -52,6 +51,8 @@ class TodayScreen extends ConsumerWidget {
       obligationDue: obligation,
     );
     final dailyRemaining = (dailyGoal - reviewed).clamp(0, dailyGoal);
+    // Due mode: goal is clearing Anki's learning+reviews — do not mix in the
+    // local "cards studied" ledger (different metric; made the ring look wrong).
     final progress = switch (mode) {
       StudyMode.dueCards => obligation <= 0 ? 1.0 : 0.0,
       StudyMode.cardCount =>
@@ -113,11 +114,10 @@ class TodayScreen extends ConsumerWidget {
                 dailyGoal: dailyGoal,
                 dailyRemaining: dailyRemaining,
                 unlockGoal: unlockGoal,
+                obligationDue: obligation,
                 learnCount: counts.learnCount,
                 reviewCount: counts.reviewCount,
                 newCount: counts.newCount,
-                obligation: obligation,
-                studyable: studyable,
                 hasDecksSelected: hasDecksSelected,
               ),
               const SupportPromptBanner(),
@@ -126,9 +126,8 @@ class TodayScreen extends ConsumerWidget {
               const SizedBox(height: 4),
               Text(
                 mode == StudyMode.dueCards
-                    ? 'Daily unlock follows AnkiDroid learning & reviews. '
-                        'Tap to change your unlock goal.'
-                    : 'Tap any section to change your daily or per-unlock goals.',
+                    ? 'Temporary unlock, or clear your Anki queue for the day.'
+                    : 'Daily goal for full unlock · temporary unlock at the gate.',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               const SizedBox(height: 16),
@@ -136,7 +135,11 @@ class TodayScreen extends ConsumerWidget {
                 _DailyGoalSection(goal: dailyGoal),
                 const SizedBox(height: 12),
               ],
-              _UnlockGoalSection(goal: unlockGoal),
+              _UnlockGoalSection(
+                goal: unlockGoal,
+                graceMinutes:
+                    ruleAsync.valueOrNull?.unlockDurationMinutes ?? 15,
+              ),
               const SizedBox(height: 12),
               _BlockedAppsSection(
                 blockedAppsAsync: blockedAppsAsync,
@@ -146,8 +149,10 @@ class TodayScreen extends ConsumerWidget {
               _StudyDecksSection(
                 decksAsync: decksAsync,
                 scopeAsync: scopeAsync,
-                due: studyable,
+                due: obligation,
               ),
+              const SizedBox(height: 12),
+              const _BlockingBehaviourSection(),
               const SizedBox(height: 28),
               Text('Today', style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 12),
@@ -155,27 +160,6 @@ class TodayScreen extends ConsumerWidget {
             ],
           ),
         ),
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: 0,
-        onTap: (index) {
-          switch (index) {
-            case 0:
-              break;
-            case 1:
-              context.push('/decks');
-              break;
-            case 2:
-              context.push('/blocking');
-              break;
-          }
-        },
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.today), label: 'Today'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.folder_outlined), label: 'Decks'),
-          BottomNavigationBarItem(icon: Icon(Icons.block), label: 'Block'),
-        ],
       ),
     );
   }
@@ -189,11 +173,10 @@ class _StudyHero extends ConsumerStatefulWidget {
   final int dailyGoal;
   final int dailyRemaining;
   final int unlockGoal;
+  final int obligationDue;
   final int learnCount;
   final int reviewCount;
   final int newCount;
-  final int obligation;
-  final int studyable;
   final bool hasDecksSelected;
 
   const _StudyHero({
@@ -204,11 +187,10 @@ class _StudyHero extends ConsumerStatefulWidget {
     required this.dailyGoal,
     required this.dailyRemaining,
     required this.unlockGoal,
+    required this.obligationDue,
     required this.learnCount,
     required this.reviewCount,
     required this.newCount,
-    required this.obligation,
-    required this.studyable,
     required this.hasDecksSelected,
   });
 
@@ -244,15 +226,11 @@ class _StudyHeroState extends ConsumerState<_StudyHero> {
     final sessionReviewed = session?.completed ?? 0;
     final dueMode = widget.mode == StudyMode.dueCards;
     final sessionGoalFallback = dueMode
-        ? (widget.obligation > 0
-            ? (widget.obligation < widget.unlockGoal
-                ? widget.obligation
+        ? (widget.obligationDue > 0
+            ? (widget.obligationDue < widget.unlockGoal
+                ? widget.obligationDue
                 : widget.unlockGoal)
-            : (widget.newCount > 0
-                ? (widget.newCount < widget.unlockGoal
-                    ? widget.newCount
-                    : widget.unlockGoal)
-                : widget.unlockGoal))
+            : widget.unlockGoal)
         : widget.dailyRemaining.clamp(1, widget.dailyGoal);
     final sessionGoal = session?.target ?? sessionGoalFallback;
     final sessionRemaining =
@@ -270,24 +248,36 @@ class _StudyHeroState extends ConsumerState<_StudyHero> {
         hasSession ? sessionReviewed : widget.reviewed;
     final displayGoal =
         hasSession ? sessionGoal : widget.dailyGoal;
-    final hasCards = widget.studyable > 0;
-    final canStartStudy = hasCards && widget.hasDecksSelected;
-
-    final queueLine =
-        '${widget.learnCount} learning · ${widget.reviewCount} to review';
-    final newLine = widget.newCount > 0 ? '${widget.newCount} new' : null;
+    final displayRemaining = hasSession
+        ? sessionRemaining
+        : (dueMode ? widget.obligationDue : widget.dailyRemaining);
+    final hasCards = widget.obligationDue > 0 || widget.newCount > 0;
+    final canStartStudy =
+        (dueMode ? widget.obligationDue > 0 : hasCards) &&
+            widget.hasDecksSelected;
 
     final subtitle = hasSession
         ? (displayComplete
             ? 'Session complete!'
-            : '$sessionRemaining cards left in this session')
+            : '$displayRemaining cards left in this session')
         : dueMode
             ? (displayComplete
-                ? 'Learning & reviews done · ${widget.reviewed} studied'
-                : '$queueLine · clear to unlock')
+                ? 'Learning & reviews cleared'
+                : '${widget.learnCount} learning · ${widget.reviewCount} to review')
             : (displayComplete
                 ? 'Unlocked until 3am · $displayReviewed studied'
-                : '${widget.dailyRemaining} cards until freedom today');
+                : '$displayRemaining cards until freedom today');
+
+    final hint = !hasSession && !displayComplete
+        ? (dueMode
+            ? (widget.newCount > 0
+                ? '${widget.newCount} new available · '
+                    '${widget.unlockGoal} cards = temporary unlock.'
+                : 'Or ${widget.unlockGoal} cards = temporary unlock.')
+            : 'Or ${widget.unlockGoal} cards = temporary unlock.')
+        : (!hasSession && displayComplete && dueMode && widget.newCount > 0
+            ? '${widget.newCount} new cards still available in AnkiDroid.'
+            : null);
 
     return BrandCard(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
@@ -304,9 +294,11 @@ class _StudyHeroState extends ConsumerState<_StudyHero> {
                 Text(
                   displayComplete
                       ? '100%'
-                      : dueMode && !hasSession
-                          ? '${widget.obligation}'
-                          : '${(displayProgress * 100).round()}%',
+                      : hasSession
+                          ? '${(displayProgress * 100).round()}%'
+                          : dueMode
+                              ? '$displayRemaining'
+                              : '${(displayProgress * 100).round()}%',
                   style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                         fontWeight: FontWeight.w700,
                         color: displayComplete
@@ -316,17 +308,17 @@ class _StudyHeroState extends ConsumerState<_StudyHero> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  dueMode && !hasSession && !displayComplete
-                      ? 'left'
-                      : !dueMode &&
-                              displayComplete &&
-                              displayReviewed > displayGoal
-                          ? '$displayReviewed'
-                          : hasSession
-                              ? '$displayReviewed / $displayGoal'
-                              : dueMode
-                                  ? '${widget.reviewed} studied'
-                                  : '$displayReviewed / $displayGoal',
+                  displayComplete
+                      ? (dueMode && !hasSession
+                          ? 'all clear'
+                          : !dueMode && displayReviewed > displayGoal
+                              ? '$displayReviewed'
+                              : '$displayReviewed / $displayGoal')
+                      : hasSession
+                          ? '$displayReviewed / $displayGoal'
+                          : dueMode
+                              ? 'left to clear'
+                              : '$displayReviewed / $displayGoal',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 if (!dueMode &&
@@ -345,20 +337,10 @@ class _StudyHeroState extends ConsumerState<_StudyHero> {
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.titleMedium,
           ),
-          if (dueMode && !hasSession) ...[
+          if (hint != null) ...[
             const SizedBox(height: 6),
             Text(
-              newLine != null
-                  ? '$newLine (optional · does not block unlock)'
-                  : 'New cards are optional and do not block unlock.',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ],
-          if (!hasSession && !displayComplete) ...[
-            const SizedBox(height: 6),
-            Text(
-              'Or ${widget.unlockGoal} cards each time you open a blocked app.',
+              hint,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodySmall,
             ),
@@ -397,11 +379,13 @@ class _StudyHeroState extends ConsumerState<_StudyHero> {
                           ? 'Studying in AnkiDroid…'
                           : !widget.hasDecksSelected
                               ? 'Select decks to study'
-                              : hasCards
-                                  ? (dueMode
-                                      ? 'Start Studying · ${widget.obligation} left'
-                                      : 'Start Studying · ${widget.studyable} due')
-                                  : 'Nothing due right now',
+                              : dueMode
+                                  ? (widget.obligationDue > 0
+                                      ? 'Start Studying · ${widget.obligationDue} left'
+                                      : 'Nothing left to clear')
+                                  : hasCards
+                                      ? 'Start Studying · ${widget.obligationDue + widget.newCount} due'
+                                      : 'Nothing due right now',
                 ),
               ],
             ),
@@ -421,8 +405,8 @@ class _DailyGoalSection extends StatelessWidget {
     return _SetupTile(
       icon: Icons.calendar_today_outlined,
       iconColor: AppTheme.primary,
-      title: 'Daily goal',
-      subtitle: '$goal cards · unlocks all apps until 3am',
+      title: 'Daily card goal',
+      subtitle: '$goal cards · all apps open until 3am',
       onTap: () => _showDailyGoalSheet(context, goal),
     );
   }
@@ -450,15 +434,19 @@ class _DailyGoalSection extends StatelessWidget {
 
 class _UnlockGoalSection extends StatelessWidget {
   final int goal;
-  const _UnlockGoalSection({required this.goal});
+  final int graceMinutes;
+  const _UnlockGoalSection({
+    required this.goal,
+    required this.graceMinutes,
+  });
 
   @override
   Widget build(BuildContext context) {
     return _SetupTile(
       icon: Icons.flag_outlined,
       iconColor: AppTheme.accent,
-      title: 'Unlock goal',
-      subtitle: '$goal cards per blocked app',
+      title: 'Temporary unlock',
+      subtitle: '$goal cards · $graceMinutes min',
       onTap: () => _showUnlockGoalSheet(context, goal),
     );
   }
@@ -651,6 +639,21 @@ class _StudyDecksSection extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _BlockingBehaviourSection extends StatelessWidget {
+  const _BlockingBehaviourSection();
+
+  @override
+  Widget build(BuildContext context) {
+    return _SetupTile(
+      icon: Icons.tune,
+      iconColor: AppTheme.accent,
+      title: 'Adjust blocking behaviour',
+      subtitle: 'Protection, unlocking, bypass',
+      onTap: () => context.push('/settings'),
     );
   }
 }

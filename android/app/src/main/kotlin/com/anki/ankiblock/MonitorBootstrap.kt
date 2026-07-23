@@ -48,11 +48,7 @@ object MonitorBootstrap {
     fun hasBlockedPackages(context: Context): Boolean {
         val prefs = context.getSharedPreferences(AppMonitorService.PREFS, Context.MODE_PRIVATE)
         val blocked = prefs.getString(AppMonitorService.KEY_BLOCKED, "") ?: ""
-        val mode = prefs.getString(
-            AppMonitorService.KEY_BLOCKING_MODE,
-            AppMonitorService.BLOCKING_MODE_SELECTED,
-        ) ?: AppMonitorService.BLOCKING_MODE_SELECTED
-        return blocked.isNotEmpty() || mode == AppMonitorService.BLOCKING_MODE_LOCKDOWN
+        return blocked.isNotEmpty()
     }
 
     fun hasUsageAccess(context: Context): Boolean {

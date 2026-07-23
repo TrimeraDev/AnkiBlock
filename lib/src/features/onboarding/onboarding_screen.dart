@@ -5,14 +5,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/assets/app_assets.dart';
+import '../../core/constants/support_links.dart';
 import '../../core/di/providers.dart';
 import '../../core/navigation/router.dart';
 import '../../core/services/ankidroid_service.dart';
 import '../../core/setup/setup_actions.dart';
+import '../../core/support/support_actions.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/blocking_goal.dart';
 import '../../core/widgets/brand_widgets.dart';
-import '../../core/widgets/deck_picker_panel.dart';
 import '../../core/widgets/setup_panels.dart';
 
 class OnboardingScreen extends ConsumerStatefulWidget {
@@ -24,7 +25,11 @@ class OnboardingScreen extends ConsumerStatefulWidget {
 
 class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
     with WidgetsBindingObserver {
-  static const _pageCount = 7;
+  static const _pageCount = 6;
+
+  /// Page indices for warm/sync hooks.
+  static const _permsPage = 3;
+  static const _appsPage = 4;
 
   final _controller = PageController();
   int _page = 0;
@@ -33,14 +38,15 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
   bool _ankiPermission = false;
   bool _hasUsage = false;
   bool _hasOverlay = false;
+  bool _hasBattery = false;
   bool _autoSelectedDueDecks = false;
+  bool _appliedDefaults = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _refresh();
-    // Warm app list for the block-apps step; warm decks for the next step.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _warmAppData();
       _warmDeckData();
@@ -66,12 +72,14 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
     final hadAnkiReady = _ankiInstalled && _ankiPermission;
     final usage = await perm.hasUsageAccessPermission();
     final overlay = await perm.hasOverlayPermission();
+    final battery = await perm.isIgnoringBatteryOptimizations();
     final ankiStatus = await anki.getStatus();
     if (!mounted) return;
     final ankiReady = ankiStatus.installed && ankiStatus.permissionGranted;
     setState(() {
       _hasUsage = usage;
       _hasOverlay = overlay;
+      _hasBattery = battery;
       _ankiInstalled = ankiStatus.installed;
       _ankiPermission = ankiStatus.permissionGranted;
     });
@@ -79,53 +87,76 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
     ref.invalidate(protectionStatusProvider);
     if (ankiReady && !hadAnkiReady) {
       ref.invalidate(ankiDroidStatusProvider);
+      ref.invalidate(studyCountsProvider);
       _warmDeckData();
+      unawaited(_applyAnkiDefaults());
     }
     if (usage && !hadUsage) {
-      unawaited(ref.read(installedAppsProvider.notifier).refresh());
-    } else if (usage && _page == 4) {
-      // Re-sort with screen time after returning from system settings.
+      // Prefetch while the user may still grant overlay — apps page is next.
+      unawaited(_prefetchAppsWithUsage());
+    } else if (usage && _page == _appsPage) {
       unawaited(ref.read(installedAppsProvider.notifier).refresh());
     }
+  }
+
+  Future<void> _prefetchAppsWithUsage() async {
+    _warmAppData();
+    await ref.read(installedAppsProvider.notifier).refresh();
   }
 
   void _warmAppData() {
     ref.read(installedAppsProvider.future);
   }
 
-  /// Start loading deck list + scope while the user is still on earlier steps.
   void _warmDeckData() {
     if (!_ankiInstalled || !_ankiPermission) return;
     ref.read(studyScopeProvider.future);
     ref.read(ankiDroidDecksProvider.future);
   }
 
-  Future<void> _finish() async {
-    await markOnboardingComplete(ref);
-    if (mounted) context.go('/');
+  /// dueCards mode + decks with learning/reviews; sync to native.
+  Future<void> _applyAnkiDefaults() async {
+    try {
+      await updateStudyMode(ref, StudyMode.dueCardsValue);
+      await _autoSelectDecksWithDue();
+      await syncBlockRuleToNative(ref);
+      _appliedDefaults = true;
+    } catch (_) {
+      // Non-fatal — Settings can finish setup.
+    }
   }
 
-  /// Prefer decks that currently have due cards for new installs.
   Future<void> _autoSelectDecksWithDue() async {
     if (_autoSelectedDueDecks) return;
-    _autoSelectedDueDecks = true;
     try {
       final status = await ref.read(ankiDroidStatusProvider.future);
       if (!status.isReady) return;
       final decks = await ref.read(ankiDroidDecksProvider.future);
       if (decks.isEmpty) return;
-      final withDue = decks.where((d) => d.totalDue > 0).toList();
+      final withDue = decks.where((d) => d.obligationDue > 0).toList();
       if (withDue.isEmpty) return;
+      _autoSelectedDueDecks = true;
       final svc = ref.read(studyScopeServiceProvider);
       final disabled =
-          decks.where((d) => d.totalDue == 0).map((d) => d.id).toSet();
+          decks.where((d) => d.obligationDue == 0).map((d) => d.id).toSet();
       await svc.setDisabledDeckIds(disabled);
       ref.invalidate(studyScopeProvider);
       ref.invalidate(studyCountsProvider);
       await syncStudyScopeToNative(ref);
     } catch (_) {
-      // Non-fatal — user can still pick decks manually.
+      // Non-fatal.
     }
+  }
+
+  Future<void> _finish() async {
+    if (!_appliedDefaults) {
+      await _applyAnkiDefaults();
+    } else {
+      await _autoSelectDecksWithDue();
+      await syncBlockRuleToNative(ref);
+    }
+    await markOnboardingComplete(ref);
+    if (mounted) context.go('/');
   }
 
   void _next() {
@@ -135,7 +166,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
         curve: Curves.easeOut,
       );
     } else {
-      _finish();
+      unawaited(_finish());
     }
   }
 
@@ -144,10 +175,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
     final perm = ref.read(permissionServiceProvider);
     final anki = ref.read(ankiDroidServiceProvider);
     final ankiReady = _ankiInstalled && _ankiPermission;
-    final ruleAsync = ref.watch(blockRuleProvider);
-    final unlockGoal = ruleAsync.valueOrNull?.cardsRequired ?? 10;
-    final blockingMode =
-        BlockingMode.fromStorage(ruleAsync.valueOrNull?.blockingMode);
+    final unlockGoal = ref.watch(blockRuleProvider).valueOrNull?.cardsRequired ?? 10;
+    final counts = ref.watch(studyCountsProvider).valueOrNull;
 
     return Scaffold(
       body: SafeArea(
@@ -158,42 +187,38 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
                 controller: _controller,
                 onPageChanged: (i) {
                   setState(() => _page = i);
-                  if (i == 3) {
+                  if (i == _permsPage) {
+                    unawaited(_refresh());
+                  }
+                  if (i == _appsPage) {
                     _warmAppData();
                     if (_hasUsage) {
-                      unawaited(
-                        ref.read(installedAppsProvider.notifier).refresh(),
-                      );
+                      // Prefer cached prefetch; refresh only if still empty.
+                      final apps = ref.read(installedAppsProvider).valueOrNull;
+                      if (apps == null || apps.isEmpty) {
+                        unawaited(
+                          ref.read(installedAppsProvider.notifier).refresh(),
+                        );
+                      }
                     }
-                  }
-                  if (i == 4) _warmDeckData();
-                  if (i == 5) {
-                    _warmDeckData();
-                    unawaited(_autoSelectDecksWithDue());
                   }
                 },
                 children: [
                   const _IntroPage(),
-                  _PermissionPage(
-                    icon: Icons.sync,
-                    title: 'Built for AnkiDroid',
-                    body: !_ankiInstalled
-                        ? 'AnkiDroid must be installed. AnkiBlock connects to '
-                            'AnkiDroid and uses your real study progress to '
-                            'unlock apps.'
-                        : !_ankiPermission
-                            ? 'AnkiDroid is installed. Grant database access '
-                                'so AnkiBlock can read your decks and due counts.'
-                            : 'AnkiBlock is connected to your AnkiDroid collection.',
-                    granted: ankiReady,
-                    showAnkiBadge: true,
+                  _AnkiConnectPage(
+                    installed: _ankiInstalled,
+                    ready: ankiReady,
+                    learnCount: counts?.learnCount,
+                    reviewCount: counts?.reviewCount,
                     actionLabel: !_ankiInstalled
                         ? 'Install AnkiDroid'
-                        : 'Grant access',
+                        : ankiReady
+                            ? 'Connected'
+                            : 'Grant access',
                     onAction: () async {
                       if (!_ankiInstalled) {
                         await anki.openAnkiDroid();
-                      } else {
+                      } else if (!ankiReady) {
                         try {
                           await anki.requestPermission();
                         } on AnkiDroidUnavailable {
@@ -202,94 +227,51 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
                       }
                       await _refresh();
                       ref.invalidate(ankiDroidStatusProvider);
+                      ref.invalidate(studyCountsProvider);
                       _warmDeckData();
-                    },
-                  ),
-                  _PermissionPage(
-                    icon: Icons.visibility_outlined,
-                    title: 'Allow Usage Access',
-                    body:
-                        'AnkiBlock needs Usage Access to detect when you open a '
-                        'blocked app. Your data stays on your device.',
-                    granted: _hasUsage,
-                    actionLabel: 'Open settings',
-                    onAction: () async {
-                      await perm.openUsageAccessSettings();
-                      await _refresh();
-                    },
-                  ),
-                  _PermissionPage(
-                    icon: Icons.layers_outlined,
-                    title: 'Allow Display Over Apps',
-                    body:
-                        'This lets the study gate appear instantly when you open '
-                        'a blocked app — no need to launch AnkiBlock manually.',
-                    granted: _hasOverlay,
-                    actionLabel: 'Open settings',
-                    onAction: () async {
-                      await perm.openOverlaySettings();
-                      await _refresh();
+                      if (_ankiInstalled && _ankiPermission) {
+                        unawaited(_applyAnkiDefaults());
+                      }
                     },
                   ),
                   _SetupScrollPage(
-                    title: 'How should apps stay locked?',
-                    subtitle:
-                        'Lock down the phone (recommended), or pick specific apps.',
-                    expandChild: true,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _OnboardingBlockingChoice(
-                          mode: blockingMode,
-                          onChanged: (m) =>
-                              updateBlockingMode(ref, m.storageValue),
-                        ),
-                        const SizedBox(height: 16),
-                        if (blockingMode == BlockingMode.lockdown)
-                          Card(
-                            child: Padding(
-                              padding: const EdgeInsets.all(16),
-                              child: Text(
-                                'Most apps stay locked until learning & reviews '
-                                'are done. AnkiDroid, Phone, and AnkiBlock stay '
-                                'available. Emergency calls always work.',
-                                style: Theme.of(context).textTheme.bodyMedium,
-                              ),
-                            ),
-                          )
-                        else
-                          Expanded(
-                            child: AppBlockSetupPanel(
-                              showUsage: _hasUsage,
-                              shrinkWrap: false,
-                              padding: EdgeInsets.zero,
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  _SetupScrollPage(
-                    title: 'Choose decks to study',
-                    subtitle:
-                        'Learning & reviews from selected decks unlock apps. '
-                        'Decks with due cards are selected by default.',
-                    expandChild: true,
-                    child: const DeckPickerPanel(
-                      shrinkWrap: false,
-                      padding: EdgeInsets.zero,
-                    ),
-                  ),
-                  _SetupScrollPage(
-                    title: 'Cards per app unlock',
-                    subtitle:
-                        'Study this many cards each time you open a blocked app. '
-                        'Your daily unlock follows AnkiDroid\'s learning & '
-                        'review counts automatically.',
+                    title: 'Temporary unlock',
+                    subtitle: 'Cards to unlock all blocked apps for a while.',
                     child: UnlockGoalPanel(
                       initial: unlockGoal,
                       showTitle: false,
                     ),
                   ),
+                  _BlockingPermissionsPage(
+                    hasUsage: _hasUsage,
+                    hasOverlay: _hasOverlay,
+                    hasBattery: _hasBattery,
+                    onOpenUsage: () async {
+                      await perm.openUsageAccessSettings();
+                      await _refresh();
+                    },
+                    onOpenOverlay: () async {
+                      await perm.openOverlaySettings();
+                      await _refresh();
+                    },
+                    onRequestBattery: () async {
+                      await perm.requestBatteryOptimizationExemption();
+                      await _refresh();
+                    },
+                  ),
+                  _SetupScrollPage(
+                    title: 'What to block',
+                    subtitle: _hasUsage
+                        ? 'Sorted by your screen time.'
+                        : 'Suggested apps. Adjust anytime.',
+                    expandChild: true,
+                    child: AppBlockSetupPanel(
+                      showUsage: _hasUsage,
+                      shrinkWrap: false,
+                      padding: EdgeInsets.zero,
+                    ),
+                  ),
+                  const _TrustPage(),
                 ],
               ),
             ),
@@ -299,7 +281,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
               child: Row(
                 children: [
                   TextButton(
-                    onPressed: _finish,
+                    onPressed: () => unawaited(_finish()),
                     child: const Text('Skip'),
                   ),
                   const Spacer(),
@@ -322,85 +304,6 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _OnboardingBlockingChoice extends StatelessWidget {
-  final BlockingMode mode;
-  final ValueChanged<BlockingMode> onChanged;
-
-  const _OnboardingBlockingChoice({
-    required this.mode,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        _ChoiceCard(
-          selected: mode == BlockingMode.lockdown,
-          title: 'Lock down phone',
-          subtitle: 'Recommended · block almost everything until you study',
-          onTap: () => onChanged(BlockingMode.lockdown),
-        ),
-        const SizedBox(height: 10),
-        _ChoiceCard(
-          selected: mode == BlockingMode.selectedApps,
-          title: 'Choose apps to block',
-          subtitle: 'Only the apps you pick stay locked',
-          onTap: () => onChanged(BlockingMode.selectedApps),
-        ),
-      ],
-    );
-  }
-}
-
-class _ChoiceCard extends StatelessWidget {
-  final bool selected;
-  final String title;
-  final String subtitle;
-  final VoidCallback onTap;
-
-  const _ChoiceCard({
-    required this.selected,
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return BrandCard(
-      color: selected
-          ? AppTheme.accent.withValues(alpha: 0.12)
-          : AppTheme.cardElevated,
-      onTap: onTap,
-      child: Row(
-        children: [
-          Icon(
-            selected ? Icons.radio_button_checked : Icons.radio_button_off,
-            color: selected ? AppTheme.accent : AppTheme.onSurfaceVariant,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                ),
-                const SizedBox(height: 2),
-                Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -479,19 +382,15 @@ class _IntroPage extends StatelessWidget {
           const SizedBox(height: 12),
           const AccentHeadline(
             before: 'Study first. ',
-            accent: 'Unlock freedom.',
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'AnkiBlock blocks your most distracting apps until you complete '
-            'your Anki cards in AnkiDroid.',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyLarge,
+            accent: 'Unlock later.',
           ),
           const SizedBox(height: 16),
-          const BrandBadge(
-            label: 'Requires AnkiDroid',
-            icon: Icons.info_outline,
+          Text(
+            'AnkiDroid reviews unlock your apps.',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                  color: AppTheme.onSurfaceVariant,
+                ),
           ),
         ],
       ),
@@ -499,27 +398,33 @@ class _IntroPage extends StatelessWidget {
   }
 }
 
-class _PermissionPage extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String body;
-  final bool granted;
-  final bool showAnkiBadge;
+class _AnkiConnectPage extends StatelessWidget {
+  final bool installed;
+  final bool ready;
+  final int? learnCount;
+  final int? reviewCount;
   final String actionLabel;
   final Future<void> Function() onAction;
 
-  const _PermissionPage({
-    required this.icon,
-    required this.title,
-    required this.body,
-    required this.granted,
-    this.showAnkiBadge = false,
+  const _AnkiConnectPage({
+    required this.installed,
+    required this.ready,
+    required this.learnCount,
+    required this.reviewCount,
     required this.actionLabel,
     required this.onAction,
   });
 
   @override
   Widget build(BuildContext context) {
+    final body = !installed
+        ? 'Install AnkiDroid to continue.'
+        : ready
+            ? (learnCount != null && reviewCount != null
+                ? '$learnCount learning · $reviewCount to review'
+                : 'Connected')
+            : 'Reads your real study counts.';
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
       child: Column(
@@ -532,18 +437,14 @@ class _PermissionPage extends StatelessWidget {
               shape: BoxShape.circle,
               border: Border.all(color: AppTheme.divider),
             ),
-            child: Icon(icon, size: 48, color: AppTheme.accent),
+            child: const Icon(Icons.sync, size: 48, color: AppTheme.accent),
           ),
           const SizedBox(height: 24),
           Text(
-            title,
+            'Connect AnkiDroid',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.headlineMedium,
           ),
-          if (showAnkiBadge) ...[
-            const SizedBox(height: 12),
-            const BrandBadge(label: 'Requires AnkiDroid', icon: Icons.sync),
-          ],
           const SizedBox(height: 16),
           Text(
             body,
@@ -551,8 +452,8 @@ class _PermissionPage extends StatelessWidget {
             style: Theme.of(context).textTheme.bodyLarge,
           ),
           const SizedBox(height: 24),
-          if (granted)
-            const _GrantedPill()
+          if (ready)
+            const _GrantedPill(label: 'Connected')
           else
             FilledButton.icon(
               onPressed: onAction,
@@ -565,8 +466,186 @@ class _PermissionPage extends StatelessWidget {
   }
 }
 
+class _BlockingPermissionsPage extends StatelessWidget {
+  final bool hasUsage;
+  final bool hasOverlay;
+  final bool hasBattery;
+  final Future<void> Function() onOpenUsage;
+  final Future<void> Function() onOpenOverlay;
+  final Future<void> Function() onRequestBattery;
+
+  const _BlockingPermissionsPage({
+    required this.hasUsage,
+    required this.hasOverlay,
+    required this.hasBattery,
+    required this.onOpenUsage,
+    required this.onOpenOverlay,
+    required this.onRequestBattery,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Turn on blocking',
+            style: Theme.of(context).textTheme.headlineMedium,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Needed to catch apps and show the study gate.',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: AppTheme.onSurfaceVariant,
+                ),
+          ),
+          const SizedBox(height: 24),
+          _PermissionRow(
+            icon: Icons.visibility_outlined,
+            title: 'Usage access',
+            granted: hasUsage,
+            opensSettings: true,
+            onGrant: onOpenUsage,
+          ),
+          const SizedBox(height: 12),
+          _PermissionRow(
+            icon: Icons.layers_outlined,
+            title: 'Display over apps',
+            granted: hasOverlay,
+            opensSettings: true,
+            onGrant: onOpenOverlay,
+          ),
+          const SizedBox(height: 12),
+          _PermissionRow(
+            icon: Icons.battery_charging_full_outlined,
+            title: 'Unrestricted battery',
+            granted: hasBattery,
+            opensSettings: false,
+            onGrant: onRequestBattery,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PermissionRow extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final bool granted;
+  final bool opensSettings;
+  final Future<void> Function() onGrant;
+
+  const _PermissionRow({
+    required this.icon,
+    required this.title,
+    required this.granted,
+    required this.opensSettings,
+    required this.onGrant,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return BrandCard(
+      color: AppTheme.cardElevated,
+      child: Row(
+        children: [
+          Icon(icon, color: AppTheme.accent),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Text(title, style: Theme.of(context).textTheme.titleSmall),
+          ),
+          if (granted)
+            const Icon(Icons.check_circle, color: AppTheme.success, size: 22)
+          else if (opensSettings)
+            FilledButton.icon(
+              onPressed: onGrant,
+              icon: const Icon(Icons.open_in_new, size: 18),
+              label: const Text('Open settings'),
+            )
+          else
+            FilledButton(
+              onPressed: onGrant,
+              child: const Text('Allow'),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TrustPage extends ConsumerWidget {
+  const _TrustPage();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    const bullets = [
+      'Free',
+      'Open source code',
+      'No ads',
+      'No data collected',
+
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Made by students, for students.',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.headlineMedium,
+          ),
+          const SizedBox(height: 28),
+          ...bullets.map(
+            (b) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Row(
+                children: [
+                  const Icon(Icons.check, color: AppTheme.accent, size: 20),
+                  const SizedBox(width: 12),
+                  Text(b, style: Theme.of(context).textTheme.titleMedium),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'Bugs or feedback?',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: AppTheme.onSurfaceVariant,
+                ),
+          ),
+          const SizedBox(height: 6),
+          InkWell(
+            onTap: () => openSupportLink(context, ref, (a) => a.openEmail()),
+            borderRadius: BorderRadius.circular(4),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Text(
+                SupportLinks.contactEmail,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: AppTheme.accent,
+                    ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _GrantedPill extends StatelessWidget {
-  const _GrantedPill();
+  final String label;
+  const _GrantedPill({this.label = 'Granted'});
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -576,12 +655,12 @@ class _GrantedPill extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: AppTheme.success.withValues(alpha: 0.35)),
       ),
-      child: const Row(
+      child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.check_circle, color: AppTheme.success, size: 18),
-          SizedBox(width: 6),
-          Text('Granted', style: TextStyle(color: AppTheme.success)),
+          const Icon(Icons.check_circle, color: AppTheme.success, size: 18),
+          const SizedBox(width: 6),
+          Text(label, style: const TextStyle(color: AppTheme.success)),
         ],
       ),
     );

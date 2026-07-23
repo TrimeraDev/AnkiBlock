@@ -265,13 +265,6 @@ class AppTheme {
         thickness: 1,
         space: 1,
       ),
-      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        backgroundColor: card,
-        selectedItemColor: accent,
-        unselectedItemColor: onSurfaceVariant,
-        type: BottomNavigationBarType.fixed,
-        elevation: 0,
-      ),
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) return accent;

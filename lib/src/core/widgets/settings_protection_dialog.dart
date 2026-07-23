@@ -49,15 +49,16 @@ class _SettingsProtectionDialog extends StatefulWidget {
 }
 
 class _SettingsProtectionDialogState extends State<_SettingsProtectionDialog> {
-  static const _softSeconds = 15;
+  static const _softSeconds = 30;
   Timer? _timer;
-  int _remaining = _softSeconds;
+  int _remaining = 0;
 
   @override
   void initState() {
     super.initState();
-    if (widget.level == SettingsProtection.soft ||
-        widget.level == SettingsProtection.strict) {
+    // Soft: wait before Confirm. Strict: no wait (Confirm + study option).
+    if (widget.level == SettingsProtection.soft) {
+      _remaining = _softSeconds;
       _timer = Timer.periodic(const Duration(seconds: 1), (_) {
         if (!mounted) return;
         if (_remaining <= 1) {
@@ -86,14 +87,14 @@ class _SettingsProtectionDialogState extends State<_SettingsProtectionDialog> {
       ProtectedEditKind.loosenBypass => 'Loosen emergency bypass?',
       ProtectedEditKind.lowerProtection => 'Lower settings protection?',
       ProtectedEditKind.switchToWeakerStudyMode => 'Switch study mode?',
-      ProtectedEditKind.weakenBlockingMode => 'Leave phone lockdown?',
     };
   }
 
   @override
   Widget build(BuildContext context) {
-    final canConfirmSoft = _remaining == 0;
+    final isSoft = widget.level == SettingsProtection.soft;
     final isStrict = widget.level == SettingsProtection.strict;
+    final canConfirm = !isSoft || _remaining == 0;
 
     return AlertDialog(
       title: Text(_title),
@@ -102,32 +103,38 @@ class _SettingsProtectionDialogState extends State<_SettingsProtectionDialog> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'This change makes blocking easier to bypass. '
-            'Stricter changes are always instant — this pause is only for '
-            'weakening rules while you still have reviews left.',
+            isSoft
+                ? 'This change makes blocking easier to bypass. '
+                    'Wait briefly before confirming while you still have '
+                    'reviews left. Stricter changes are always instant.'
+                : 'This change makes blocking easier to bypass. '
+                    'Confirm to apply it once, or study to unlock settings '
+                    'for a short window. Stricter changes are always instant.',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
-          const SizedBox(height: 16),
-          if (!canConfirmSoft)
-            Text(
-              'Wait $_remaining seconds…',
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    color: AppTheme.accent,
-                    fontWeight: FontWeight.w600,
-                  ),
-            )
-          else
-            Text(
-              'You can confirm now.',
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    color: AppTheme.success,
-                    fontWeight: FontWeight.w600,
-                  ),
-            ),
+          if (isSoft) ...[
+            const SizedBox(height: 16),
+            if (_remaining > 0)
+              Text(
+                'Wait $_remaining seconds…',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: AppTheme.accent,
+                      fontWeight: FontWeight.w600,
+                    ),
+              )
+            else
+              Text(
+                'You can confirm now.',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: AppTheme.success,
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+          ],
           if (isStrict) ...[
             const SizedBox(height: 12),
             Text(
-              'Or study ${widget.unlockGoal} cards to unlock settings for '
+              'Study ${widget.unlockGoal} cards to unlock settings for '
               '${widget.unlockMinutes} minutes.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
@@ -149,7 +156,7 @@ class _SettingsProtectionDialogState extends State<_SettingsProtectionDialog> {
             child: const Text('Study to unlock'),
           ),
         FilledButton(
-          onPressed: canConfirmSoft
+          onPressed: canConfirm
               ? () => Navigator.pop(
                     context,
                     SettingsProtectionDialogResult.allowedSoft,

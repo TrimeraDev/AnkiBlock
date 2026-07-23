@@ -45,10 +45,9 @@ class _SettingsBody extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final cards = rule?.cardsRequired ?? 10;
     final daily = rule?.dailyCardsGoal ?? 30;
-    final minutes = rule?.unlockDurationMinutes ?? 10;
+    final minutes = rule?.unlockDurationMinutes ?? 15;
     final bypassEnabled = rule?.bypassEnabled ?? true;
-    final bypassCap = rule?.bypassDailyCap ?? 2;
-    final bypassSeconds = rule?.bypassSeconds ?? 60;
+    final bypassCap = rule?.bypassDailyCap ?? 3;
     final enabled = rule?.isEnabled ?? true;
     final mode = StudyMode.fromStorage(rule?.studyMode);
     final protection =
@@ -57,48 +56,88 @@ class _SettingsBody extends ConsumerWidget {
 
     return ListView(
       children: [
-        const _SectionHeader(label: 'Permissions'),
+        const _SectionHeader(label: 'Protection'),
         ListTile(
-          leading: const Icon(Icons.lock_outline),
-          title: const Text('Permissions'),
-          subtitle: const Text('Usage Access and Overlay'),
+          leading: const Icon(Icons.lock_person_outlined),
+          title: const Text('Block future-you'),
+          subtitle: Text('${protection.label} · harder to weaken settings'),
           trailing: const Icon(Icons.chevron_right),
-          onTap: () => context.push('/permissions'),
+          onTap: () => _pickProtection(context, ref, protection),
         ),
+        if (protection == SettingsProtection.strict)
+          ListTile(
+            leading: const Icon(Icons.hourglass_bottom_outlined),
+            title: const Text('Free-edit window'),
+            subtitle: Text('$settingsUnlockMinutes min after unlock'),
+            onTap: () async {
+              final result = await _pickInt(
+                context,
+                title: 'Free-edit window',
+                initial: settingsUnlockMinutes,
+                min: 1,
+                max: 60,
+                suffix: 'minutes',
+              );
+              if (result != null) {
+                await updateSettingsProtection(ref, unlockMinutes: result);
+              }
+            },
+          ),
         const Divider(),
-        const _SectionHeader(label: 'Source'),
+        const _SectionHeader(label: 'Unlocking'),
         ListTile(
-          leading: const Icon(Icons.sync),
-          title: const Text('AnkiDroid sync'),
-          subtitle: const Text(
-            'AnkiBlock uses your AnkiDroid collection as the source of truth.',
+          leading: const Icon(Icons.flag_outlined),
+          title: const Text('Daily freedom'),
+          subtitle: Text(
+            mode == StudyMode.dueCards
+                ? 'Clear learning & reviews'
+                : 'Fixed daily card count',
           ),
           trailing: const Icon(Icons.chevron_right),
-          onTap: () => context.push('/ankidroid'),
+          onTap: () => _pickStudyMode(context, ref, mode),
         ),
-        ListTile(
-          leading: const Icon(Icons.folder_outlined),
-          title: const Text('Deck scope'),
-          subtitle: const Text(
-            'Choose which AnkiDroid decks AnkiBlock studies from.',
+        if (mode == StudyMode.cardCount)
+          ListTile(
+            leading: const Icon(Icons.calendar_today_outlined),
+            title: const Text('Daily card goal'),
+            subtitle: Text('$daily cards · free until 3am'),
+            onTap: () async {
+              final result = await _pickInt(
+                context,
+                title: 'Daily card goal',
+                initial: daily,
+                min: 5,
+                max: 200,
+                suffix: 'cards',
+              );
+              if (result == null) return;
+              if (isWeakeningDailyGoal(current: daily, proposed: result)) {
+                final ok = await ref
+                    .read(settingsProtectionServiceProvider)
+                    .requestProtectedEdit(
+                      context,
+                      kind: ProtectedEditKind.lowerDailyGoal,
+                    );
+                if (!ok) return;
+              }
+              await _save(ref, dailyCardsGoal: Value(result));
+              await syncDailyGoalToNative(ref);
+            },
           ),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => context.push('/decks'),
-        ),
-        const Divider(),
-        const _SectionHeader(label: 'Study goals'),
         ListTile(
           leading: const Icon(Icons.tune),
-          title: const Text('Unlock goal'),
-          subtitle: Text('$cards cards per blocked app'),
+          title: const Text('Temporary unlock'),
+          subtitle: Text('$cards cards · all apps for $minutes min'),
           onTap: () async {
             final result = await _pickInt(
               context,
-              title: 'Cards per unlock',
+              title: 'Temporary unlock',
               initial: cards,
-              min: 1,
+              min: 5,
               max: 50,
+              step: 5,
               suffix: 'cards',
+              presets: const [5, 10, 15, 20, 25, 30, 40, 50],
             );
             if (result == null) return;
             if (isWeakeningUnlockGoal(current: cards, proposed: result)) {
@@ -113,11 +152,31 @@ class _SettingsBody extends ConsumerWidget {
             await _save(ref, cardsRequired: Value(result));
           },
         ),
+        ListTile(
+          leading: const Icon(Icons.timer_outlined),
+          title: const Text('Unlock length'),
+          subtitle: Text('$minutes minutes'),
+          onTap: () async {
+            final result = await _pickInt(
+              context,
+              title: 'Unlock length',
+              initial: minutes,
+              min: 5,
+              max: 120,
+              step: 5,
+              suffix: 'minutes',
+              presets: const [5, 10, 15, 20, 30, 45, 60, 90, 120],
+            );
+            if (result != null) {
+              await _save(ref, unlockDurationMinutes: Value(result));
+              await syncBlockRuleToNative(ref);
+            }
+          },
+        ),
         SwitchListTile(
           secondary: const Icon(Icons.shield_outlined),
           title: const Text('Blocking enabled'),
-          subtitle: const Text(
-              'When off, blocked apps open without requiring a study session.'),
+          subtitle: const Text('Off = blocked apps open freely'),
           value: enabled,
           onChanged: (v) async {
             if (!v) {
@@ -132,75 +191,14 @@ class _SettingsBody extends ConsumerWidget {
             await _save(ref, isEnabled: Value(v));
           },
         ),
-        ListTile(
-          leading: const Icon(Icons.timer_outlined),
-          title: const Text('Per-app unlock grace'),
-          subtitle: Text('$minutes minutes after a gate unlock'),
-          onTap: () async {
-            final result = await _pickInt(
-              context,
-              title: 'Unlock duration',
-              initial: minutes,
-              min: 1,
-              max: 120,
-              suffix: 'minutes',
-            );
-            if (result != null) {
-              await _save(ref, unlockDurationMinutes: Value(result));
-              await syncBlockRuleToNative(ref);
-            }
-          },
-        ),
-        const Divider(),
-        const _SectionHeader(label: 'Settings protection'),
-        ListTile(
-          leading: const Icon(Icons.lock_person_outlined),
-          title: const Text('Protection level'),
-          subtitle: Text(
-            '${protection.label} · weakening changes are harder while you '
-            'still have reviews to do',
-          ),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => _pickProtection(context, ref, protection),
-        ),
-        if (protection == SettingsProtection.strict)
-          ListTile(
-            leading: const Icon(Icons.hourglass_bottom_outlined),
-            title: const Text('Settings unlock window'),
-            subtitle: Text('$settingsUnlockMinutes minutes after friction'),
-            onTap: () async {
-              final result = await _pickInt(
-                context,
-                title: 'Unlock window',
-                initial: settingsUnlockMinutes,
-                min: 1,
-                max: 60,
-                suffix: 'minutes',
-              );
-              if (result != null) {
-                await updateSettingsProtection(ref, unlockMinutes: result);
-              }
-            },
-          ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: Text(
-            'Stricter changes are always instant. Full settings access unlocks '
-            'once your study goal is complete.',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-        ),
         const Divider(),
         const _SectionHeader(label: 'Emergency bypass'),
         SwitchListTile(
           secondary: const Icon(Icons.emergency_outlined),
           title: const Text('Emergency bypass'),
-          subtitle: const Text(
-            'Short timed access from the study gate without reviewing cards.',
-          ),
+          subtitle: Text('${kBypassSeconds}s without studying'),
           value: bypassEnabled,
           onChanged: (v) async {
-            // Enabling bypass is loosening; disabling is tightening.
             if (v) {
               final ok = await ref
                   .read(settingsProtectionServiceProvider)
@@ -216,7 +214,7 @@ class _SettingsBody extends ConsumerWidget {
         ListTile(
           leading: const Icon(Icons.repeat),
           title: const Text('Bypasses per day'),
-          subtitle: Text('$bypassCap uses per study day'),
+          subtitle: Text('$bypassCap per study day'),
           enabled: bypassEnabled,
           onTap: bypassEnabled
               ? () async {
@@ -243,89 +241,20 @@ class _SettingsBody extends ConsumerWidget {
                 }
               : null,
         ),
-        ListTile(
-          leading: const Icon(Icons.timer_off_outlined),
-          title: const Text('Bypass duration'),
-          subtitle: Text('$bypassSeconds seconds per use'),
-          enabled: bypassEnabled,
-          onTap: bypassEnabled
-              ? () async {
-                  final result = await _pickInt(
-                    context,
-                    title: 'Bypass duration',
-                    initial: bypassSeconds,
-                    min: 15,
-                    max: 300,
-                    suffix: 'seconds',
-                  );
-                  if (result == null) return;
-                  if (isWeakeningBypassSeconds(
-                      current: bypassSeconds, proposed: result)) {
-                    final ok = await ref
-                        .read(settingsProtectionServiceProvider)
-                        .requestProtectedEdit(
-                          context,
-                          kind: ProtectedEditKind.loosenBypass,
-                        );
-                    if (!ok) return;
-                  }
-                  await _save(ref, bypassSeconds: Value(result));
-                  await syncBlockRuleToNative(ref);
-                }
-              : null,
-        ),
         const Divider(),
-        const _SectionHeader(label: 'Advanced'),
+        const _SectionHeader(label: 'Permissions'),
         ListTile(
-          leading: const Icon(Icons.flag_outlined),
-          title: const Text('Study mode'),
-          subtitle: Text(mode.subtitle),
+          leading: const Icon(Icons.lock_outline),
+          title: const Text('Permissions & AnkiDroid'),
+          subtitle: const Text('Usage, overlay, battery, AnkiDroid'),
           trailing: const Icon(Icons.chevron_right),
-          onTap: () => _pickStudyMode(context, ref, mode),
-        ),
-        if (mode == StudyMode.cardCount)
-          ListTile(
-            leading: const Icon(Icons.calendar_today_outlined),
-            title: const Text('Daily goal'),
-            subtitle: Text('$daily cards · unlocks all apps until 3am'),
-            onTap: () async {
-              final result = await _pickInt(
-                context,
-                title: 'Daily goal',
-                initial: daily,
-                min: 5,
-                max: 200,
-                suffix: 'cards',
-              );
-              if (result == null) return;
-              if (isWeakeningDailyGoal(current: daily, proposed: result)) {
-                final ok = await ref
-                    .read(settingsProtectionServiceProvider)
-                    .requestProtectedEdit(
-                      context,
-                      kind: ProtectedEditKind.lowerDailyGoal,
-                    );
-                if (!ok) return;
-              }
-              await _save(ref, dailyCardsGoal: Value(result));
-              await syncDailyGoalToNative(ref);
-            },
-          ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: Text(
-            'Card count ignores AnkiDroid\'s queue and uses a fixed daily '
-            'number instead. Anki queue (default) unlocks when learning & '
-            'reviews are done.',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
+          onTap: () => context.push('/permissions'),
         ),
         const Divider(),
         const _SectionHeader(label: 'Support'),
         ListTile(
           leading: const Icon(Icons.star_outline),
           title: const Text('Rate AnkiBlock'),
-          subtitle: const Text('In-app Google Play review when available'),
           onTap: () => openSupportLink(
             context,
             ref,
@@ -335,19 +264,16 @@ class _SettingsBody extends ConsumerWidget {
         ListTile(
           leading: const Icon(Icons.local_cafe_outlined),
           title: const Text('Tip on Ko-fi'),
-          subtitle: const Text('Optional personal tip to the developer'),
           onTap: () => openSupportLink(context, ref, (a) => a.openKofi()),
         ),
         ListTile(
           leading: const Icon(Icons.volunteer_activism_outlined),
           title: const Text('Tip on PayPal'),
-          subtitle: const Text('paypal.me/trimera'),
           onTap: () => openSupportLink(context, ref, (a) => a.openPayPal()),
         ),
         ListTile(
           leading: const Icon(Icons.language),
           title: const Text('Website & privacy'),
-          subtitle: const Text('Project info, privacy policy, imprint'),
           onTap: () => openSupportLink(context, ref, (a) => a.openWebsite()),
         ),
         const Divider(),
@@ -357,39 +283,16 @@ class _SettingsBody extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  Icon(Icons.info_outline, color: AppTheme.onSurfaceVariant),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'AnkiBlock',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        Text(
-                          'Version 1.0.0',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
               Text(
-                'AnkiBlock is an open-source side project — entirely free, with '
-                'no ads and no commercial intent. Simon & Vincent UG is the '
-                'Play Store publisher for legal reasons only.',
+                'AnkiBlock · Version 1.0.0',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Free, no ads, open source.',
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
-              const SizedBox(height: 10),
-              Text(
-                'Questions or feedback?',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
+              const SizedBox(height: 8),
               InkWell(
                 onTap: () => openSupportLink(
                   context,
@@ -432,18 +335,16 @@ class _SettingsBody extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              title: const Text('Anki queue'),
-              subtitle: const Text(
-                'Recommended · unlock when learning & reviews are done',
-              ),
+              title: const Text('Clear learning & reviews'),
+              subtitle: const Text('Recommended · free when queue is done'),
               trailing: current == StudyMode.dueCards
                   ? const Icon(Icons.check, color: AppTheme.accent)
                   : null,
               onTap: () => Navigator.pop(ctx, StudyMode.dueCards),
             ),
             ListTile(
-              title: const Text('Card count'),
-              subtitle: const Text('Unlock after a fixed daily card goal'),
+              title: const Text('Fixed daily card count'),
+              subtitle: const Text('Free until 3am after today\'s goal'),
               trailing: current == StudyMode.cardCount
                   ? const Icon(Icons.check, color: AppTheme.accent)
                   : null,
@@ -489,11 +390,9 @@ class _SettingsBody extends ConsumerWidget {
               ListTile(
                 title: Text(level.label),
                 subtitle: Text(switch (level) {
-                  SettingsProtection.off => 'No extra friction',
-                  SettingsProtection.soft =>
-                    '15-second pause before weakening changes',
-                  SettingsProtection.strict =>
-                    'Pause, or study to unlock settings temporarily',
+                  SettingsProtection.off => 'No friction',
+                  SettingsProtection.soft => '30s pause before weakening',
+                  SettingsProtection.strict => 'Confirm, or study to edit freely',
                 }),
                 trailing: current == level
                     ? const Icon(Icons.check, color: AppTheme.accent)
@@ -524,7 +423,6 @@ class _SettingsBody extends ConsumerWidget {
     Value<int>? unlockDurationMinutes,
     Value<bool>? bypassEnabled,
     Value<int>? bypassDailyCap,
-    Value<int>? bypassSeconds,
     Value<bool>? isEnabled,
   }) async {
     final db = ref.read(databaseProvider);
@@ -535,14 +433,11 @@ class _SettingsBody extends ConsumerWidget {
       unlockDurationMinutes: unlockDurationMinutes ?? const Value.absent(),
       bypassEnabled: bypassEnabled ?? const Value.absent(),
       bypassDailyCap: bypassDailyCap ?? const Value.absent(),
-      bypassSeconds: bypassSeconds ?? const Value.absent(),
       isEnabled: isEnabled ?? const Value.absent(),
       updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
     ));
     ref.invalidate(blockRuleProvider);
-    if (unlockDurationMinutes != null ||
-        bypassSeconds != null ||
-        isEnabled != null) {
+    if (unlockDurationMinutes != null || isEnabled != null) {
       await syncBlockRuleToNative(ref);
     }
   }
@@ -554,8 +449,20 @@ class _SettingsBody extends ConsumerWidget {
     required int min,
     required int max,
     required String suffix,
+    int step = 1,
+    List<int>? presets,
   }) {
-    int value = initial;
+    int snap(int raw) {
+      if (step <= 1) return raw.clamp(min, max);
+      final snapped = ((raw - min) / step).round() * step + min;
+      return snapped.clamp(min, max);
+    }
+
+    int value = snap(initial);
+    final chips = (presets ?? const <int>[])
+        .where((p) => p >= min && p <= max)
+        .toList();
+
     return showDialog<int>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -568,13 +475,42 @@ class _SettingsBody extends ConsumerWidget {
                 '$value $suffix',
                 style: Theme.of(ctx).textTheme.headlineSmall,
               ),
+              if (chips.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    for (final p in chips)
+                      ChoiceChip(
+                        label: Text('$p'),
+                        selected: value == p,
+                        onSelected: (_) => setState(() => value = p),
+                        selectedColor: AppTheme.accent.withValues(alpha: 0.25),
+                        labelStyle: TextStyle(
+                          color: value == p
+                              ? AppTheme.accent
+                              : AppTheme.onSurface,
+                          fontWeight:
+                              value == p ? FontWeight.w600 : FontWeight.w500,
+                        ),
+                        side: BorderSide(
+                          color: value == p ? AppTheme.accent : AppTheme.divider,
+                        ),
+                      ),
+                  ],
+                ),
+              ],
               Slider(
                 value: value.toDouble(),
                 min: min.toDouble(),
                 max: max.toDouble(),
-                divisions: max - min,
+                divisions: step <= 1
+                    ? (max - min)
+                    : ((max - min) / step).round(),
                 label: '$value',
-                onChanged: (v) => setState(() => value = v.round()),
+                onChanged: (v) => setState(() => value = snap(v.round())),
               ),
             ],
           ),

@@ -16,6 +16,7 @@ import android.os.Bundle
 import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.embedding.engine.FlutterEngineCache
 import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayOutputStream
 import java.util.Calendar
@@ -25,19 +26,35 @@ class MainActivity : FlutterActivity() {
         const val ACTION_OPEN_GATE = "com.ankiblock.OPEN_GATE"
         const val ACTION_DISMISS_GATE = "com.ankiblock.DISMISS_GATE"
 
+        private const val CHANNEL_NAME = "com.ankiblock/permissions"
+
         @Volatile
         private var flutterEventChannel: MethodChannel? = null
 
         fun notifyFlutter(method: String, arguments: Any?) {
-            flutterEventChannel?.invokeMethod(method, arguments)
+            val channel = flutterEventChannel
+            if (channel != null) {
+                channel.invokeMethod(method, arguments)
+                return
+            }
+            // Pre-warmed engine may run Dart before MainActivity configures the channel.
+            val engine = FlutterEngineCache.getInstance()
+                .get(AnkiBlockApplication.ENGINE_ID)
+                ?: return
+            MethodChannel(engine.dartExecutor.binaryMessenger, CHANNEL_NAME)
+                .invokeMethod(method, arguments)
         }
     }
 
-    private val channelName = "com.ankiblock/permissions"
+    private val channelName = CHANNEL_NAME
     private val ankiDroidChannelName = "com.ankiblock/ankidroid"
     private var methodChannel: MethodChannel? = null
     private var pendingGate: Map<String, String>? = null
     private var ankiDroidApi: AnkiDroidApi? = null
+
+    override fun getCachedEngineId(): String = AnkiBlockApplication.ENGINE_ID
+
+    override fun shouldDestroyEngineWithHost(): Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         if (intent?.action == ACTION_DISMISS_GATE) {
@@ -143,19 +160,20 @@ class MainActivity : FlutterActivity() {
                 }
                 "syncBlockRuleSettings" -> {
                     val unlockDurationMinutes =
-                        call.argument<Int>("unlockDurationMinutes") ?: 10
+                        call.argument<Int>("unlockDurationMinutes") ?: 15
                     val bypassSeconds = call.argument<Int>("bypassSeconds") ?: 60
                     val isEnabled = call.argument<Boolean>("isEnabled") ?: true
                     val studyMode = call.argument<String>("studyMode") ?: "cardCount"
-                    val blockingMode =
-                        call.argument<String>("blockingMode") ?: "selectedApps"
+                    val unlockGoal = call.argument<Int>("unlockGoal") ?: 10
+                    val bypassEnabled = call.argument<Boolean>("bypassEnabled") ?: true
                     AppMonitorService.setBlockRuleSettings(
                         this,
                         unlockDurationMinutes,
                         bypassSeconds,
                         isEnabled,
                         studyMode,
-                        blockingMode,
+                        unlockGoal,
+                        bypassEnabled,
                     )
                     result.success(true)
                 }
@@ -181,34 +199,57 @@ class MainActivity : FlutterActivity() {
                 "getDailyGoalState" -> {
                     result.success(AppMonitorService.getDailyGoalState(this))
                 }
+                "getDelegatedSessionState" -> {
+                    result.success(AppMonitorService.getDelegatedSessionState(this))
+                }
+                "tryUnlockFromRecentBout" -> {
+                    val pkg = call.argument<String>("packageName") ?: ""
+                    val appName = call.argument<String>("appName") ?: pkg
+                    val target = call.argument<Int>("target") ?: 10
+                    val unlocked = AppMonitorService.tryUnlockFromRecentBout(
+                        this,
+                        pkg,
+                        appName,
+                        target,
+                    )
+                    result.success(unlocked)
+                }
+                "isTemporarilyUnlocked" -> {
+                    val pkg = call.argument<String>("packageName") ?: ""
+                    result.success(AppMonitorService.isTemporarilyUnlocked(this, pkg))
+                }
+                "getStudyBoutCount" -> {
+                    result.success(AppMonitorService.peekStudyBoutCountPublic(this))
+                }
                 "startDelegatedSession" -> {
                     val pkg = call.argument<String>("packageName") ?: ""
                     val appName = call.argument<String>("appName") ?: pkg
                     val deckId = (call.argument<Number>("deckId"))?.toLong() ?: -1L
                     val target = call.argument<Int>("target") ?: 5
-                    val baseline = call.argument<Int>("baseline") ?: 0
                     @Suppress("UNCHECKED_CAST")
                     val deckIds = (call.argument<List<*>>("deckIds") ?: emptyList<Any?>())
                         .mapNotNull { (it as? Number)?.toLong() }
-                    AppMonitorService.startDelegatedSession(
+                    val session = AppMonitorService.startDelegatedSession(
                         this,
                         pkg,
                         appName,
                         deckId,
                         deckIds,
                         target,
-                        baseline,
                     )
-                    val monitorIntent = Intent(this, AppMonitorService::class.java).apply {
-                        action = AppMonitorService.ACTION_DELEGATED_START
+                    val unlocked = session["unlocked"] as? Boolean == true
+                    if (!unlocked) {
+                        val monitorIntent = Intent(this, AppMonitorService::class.java).apply {
+                            action = AppMonitorService.ACTION_DELEGATED_START
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            startForegroundService(monitorIntent)
+                        } else {
+                            startService(monitorIntent)
+                        }
+                        MonitorWatchdog.schedule(this)
                     }
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        startForegroundService(monitorIntent)
-                    } else {
-                        startService(monitorIntent)
-                    }
-                    MonitorWatchdog.schedule(this)
-                    result.success(true)
+                    result.success(session)
                 }
                 "cancelDelegatedSession" -> {
                     AppMonitorService.cancelDelegatedSession(this)
@@ -247,9 +288,14 @@ class MainActivity : FlutterActivity() {
             }
         }
 
-        // If launched with a gate intent, surface it once channel is ready
-        consumeGateIntent(intent)
-        pendingGate?.let { notifyGateToFlutter(it) }
+        // If launched with a gate intent, surface it once channel is ready.
+        // Launcher opens must not revive a leftover pending gate.
+        if (isLauncherIntent(intent)) {
+            pendingGate = null
+        } else {
+            consumeGateIntent(intent)
+            pendingGate?.let { notifyGateToFlutter(it) }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -257,6 +303,12 @@ class MainActivity : FlutterActivity() {
         setIntent(intent)
         if (intent.action == ACTION_DISMISS_GATE) {
             removeGateFromRecents()
+            return
+        }
+        if (isLauncherIntent(intent)) {
+            // Icon tap should open the normal app, not resume a leftover gate.
+            pendingGate = null
+            notifyHomeToFlutter()
             return
         }
         consumeGateIntent(intent)
@@ -273,6 +325,13 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun isLauncherIntent(intent: Intent?): Boolean {
+        if (intent == null) return false
+        if (intent.action != Intent.ACTION_MAIN) return false
+        val categories = intent.categories ?: return false
+        return categories.contains(Intent.CATEGORY_LAUNCHER)
+    }
+
     private fun consumeGateIntent(intent: Intent?) {
         if (intent?.action == ACTION_OPEN_GATE) {
             val pkg = intent.getStringExtra("packageName") ?: return
@@ -283,6 +342,12 @@ class MainActivity : FlutterActivity() {
 
     private fun notifyGateToFlutter(payload: Map<String, String>) {
         methodChannel?.invokeMethod("openGate", payload)
+    }
+
+    private fun notifyHomeToFlutter() {
+        methodChannel?.invokeMethod("openHome", null)
+        // Channel may not be ready yet on very early resume; companion works too.
+        notifyFlutter("openHome", null)
     }
 
     private fun getInstalledApps(includeIcons: Boolean): List<Map<String, Any?>> {

@@ -57,12 +57,12 @@ class CompletionOverlayManager(private val context: Context) {
             view.findViewById<TextView>(R.id.completion_title).text =
                 "You've studied $cardsCompleted cards!"
             view.findViewById<TextView>(R.id.completion_subtitle).text =
-                "You can open $appName or keep studying in AnkiDroid."
+                "All blocked apps are unlocked for a bit. Open $appName or keep studying."
 
             view.findViewById<Button>(R.id.btn_open_app).apply {
                 text = "Open $appName"
                 setOnClickListener {
-                    AppMonitorService.grantTempUnlock(context, packageName)
+                    AppMonitorService.grantTempUnlockAllBlocked(context)
                     AppMonitorService.dismissGateUi(context)
                     launchApp(packageName)
                     dismissInternal()
@@ -117,7 +117,7 @@ class CompletionOverlayManager(private val context: Context) {
     }
 
     private fun completeWithoutOverlay(packageName: String, onDismiss: () -> Unit) {
-        AppMonitorService.grantTempUnlock(context, packageName)
+        AppMonitorService.grantTempUnlockAllBlocked(context)
         AppMonitorService.dismissGateUi(context)
         onDismiss()
     }

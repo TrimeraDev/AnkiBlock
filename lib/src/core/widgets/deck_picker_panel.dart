@@ -46,12 +46,12 @@ class _DeckPickerPanelState extends ConsumerState<DeckPickerPanel> {
       list = list.where((d) => d.name.toLowerCase().contains(q)).toList();
     }
     if (_onlyWithDue) {
-      list = list.where((d) => d.totalDue > 0).toList();
+      list = list.where((d) => d.obligationDue > 0).toList();
     }
     switch (_sort) {
       case _DeckSort.dueDesc:
         list.sort((a, b) {
-          final cmp = b.totalDue.compareTo(a.totalDue);
+          final cmp = b.obligationDue.compareTo(a.obligationDue);
           if (cmp != 0) return cmp;
           return a.name.compareTo(b.name);
         });
@@ -420,7 +420,7 @@ class _BulkActionsHeader extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '$enabledCount of $totalCount decks · $dueTotal due',
+            '$enabledCount of $totalCount decks · $dueTotal learning & reviews',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: AppTheme.onSurfaceVariant,
                 ),
@@ -453,9 +453,9 @@ class _BulkActionsHeader extends ConsumerWidget {
               ),
               TextButton(
                 onPressed: () async {
-                  final withDue = decks.where((d) => d.totalDue > 0).toList();
+                  final withDue = decks.where((d) => d.obligationDue > 0).toList();
                   final disabled = decks
-                      .where((d) => d.totalDue == 0)
+                      .where((d) => d.obligationDue == 0)
                       .map((d) => d.id)
                       .toSet();
                   // Shrinking when disabling currently-enabled decks.
@@ -506,9 +506,9 @@ class _DeckPickerRow extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final enabled = !scope.disabledDeckIds.contains(deck.id);
     final isActive = scope.activeDeckId == deck.id;
-    final subtitle = '${deck.newCount} new • '
-        '${deck.learnCount} learning • '
-        '${deck.reviewCount} review';
+    final subtitle = '${deck.newCount} new · '
+        '${deck.learnCount} learning · '
+        '${deck.reviewCount} to review';
 
     if (scope.mode == StudyScopeMode.single) {
       return RadioListTile<int>(

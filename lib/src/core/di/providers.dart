@@ -165,7 +165,8 @@ final blockRuleProvider = StreamProvider<BlockRule?>((ref) {
   return db.watchBlockRule();
 });
 
-/// Whether the active study-mode goal is complete (due cleared or card count met).
+/// Whether the active study-mode goal is complete (learning+reviews cleared
+/// or card-count goal met).
 final blockingGoalCompleteProvider = Provider<bool>((ref) {
   final rule = ref.watch(blockRuleProvider).valueOrNull;
   final mode = StudyMode.fromStorage(rule?.studyMode);
@@ -223,6 +224,10 @@ final gateTodayUsageProvider =
 /// Live progress while a delegated AnkiDroid study session is running.
 final delegatedSessionProgressProvider =
     StateProvider<DelegatedSessionProgress?>((ref) => null);
+
+/// Cards already credited to today's ledger before this gate session (bout seed).
+/// Progress listener must not count these again toward daily stats.
+final delegatedProgressCreditFloorProvider = StateProvider<int>((ref) => 0);
 
 // Support prompt --------------------------------------------------------------
 

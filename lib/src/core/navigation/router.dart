@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../di/providers.dart';
 import '../../features/today/today_screen.dart';
 import '../../features/decks/decks_screen.dart';
 import '../../features/blocking/blocking_screen.dart';
@@ -78,5 +79,9 @@ final onboardingCompleteProvider = FutureProvider<bool>((ref) async {
 Future<void> markOnboardingComplete(WidgetRef ref) async {
   final prefs = await SharedPreferences.getInstance();
   await prefs.setBool(_onboardingKey, true);
+  // Don't count setup / permission settings trips as opens.
+  await ref.read(supportPromptServiceProvider).resetLaunchTracking();
+  ref.read(appLaunchCountProvider.notifier).state = 0;
+  ref.read(supportPromptVisibleProvider.notifier).state = false;
   ref.invalidate(onboardingCompleteProvider);
 }

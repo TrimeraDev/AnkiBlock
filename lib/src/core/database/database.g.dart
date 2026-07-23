@@ -317,7 +317,7 @@ class $BlockRulesTable extends BlockRules
       'unlock_duration_minutes', aliasedName, false,
       type: DriftSqlType.int,
       requiredDuringInsert: false,
-      defaultValue: const Constant(10));
+      defaultValue: const Constant(15));
   static const VerificationMeta _bypassEnabledMeta =
       const VerificationMeta('bypassEnabled');
   @override
@@ -335,7 +335,7 @@ class $BlockRulesTable extends BlockRules
       'bypass_daily_cap', aliasedName, false,
       type: DriftSqlType.int,
       requiredDuringInsert: false,
-      defaultValue: const Constant(2));
+      defaultValue: const Constant(3));
   static const VerificationMeta _bypassSecondsMeta =
       const VerificationMeta('bypassSeconds');
   @override
@@ -368,14 +368,6 @@ class $BlockRulesTable extends BlockRules
       type: DriftSqlType.int,
       requiredDuringInsert: false,
       defaultValue: const Constant(10));
-  static const VerificationMeta _blockingModeMeta =
-      const VerificationMeta('blockingMode');
-  @override
-  late final GeneratedColumn<String> blockingMode = GeneratedColumn<String>(
-      'blocking_mode', aliasedName, false,
-      type: DriftSqlType.string,
-      requiredDuringInsert: false,
-      defaultValue: const Constant('selectedApps'));
   static const VerificationMeta _isEnabledMeta =
       const VerificationMeta('isEnabled');
   @override
@@ -406,7 +398,6 @@ class $BlockRulesTable extends BlockRules
         studyMode,
         settingsProtection,
         settingsUnlockMinutes,
-        blockingMode,
         isEnabled,
         updatedAt
       ];
@@ -475,12 +466,6 @@ class $BlockRulesTable extends BlockRules
           settingsUnlockMinutes.isAcceptableOrUnknown(
               data['settings_unlock_minutes']!, _settingsUnlockMinutesMeta));
     }
-    if (data.containsKey('blocking_mode')) {
-      context.handle(
-          _blockingModeMeta,
-          blockingMode.isAcceptableOrUnknown(
-              data['blocking_mode']!, _blockingModeMeta));
-    }
     if (data.containsKey('is_enabled')) {
       context.handle(_isEnabledMeta,
           isEnabled.isAcceptableOrUnknown(data['is_enabled']!, _isEnabledMeta));
@@ -518,8 +503,6 @@ class $BlockRulesTable extends BlockRules
           DriftSqlType.string, data['${effectivePrefix}settings_protection'])!,
       settingsUnlockMinutes: attachedDatabase.typeMapping.read(
           DriftSqlType.int, data['${effectivePrefix}settings_unlock_minutes'])!,
-      blockingMode: attachedDatabase.typeMapping
-          .read(DriftSqlType.string, data['${effectivePrefix}blocking_mode'])!,
       isEnabled: attachedDatabase.typeMapping
           .read(DriftSqlType.bool, data['${effectivePrefix}is_enabled'])!,
       updatedAt: attachedDatabase.typeMapping
@@ -548,9 +531,6 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
   /// `off` | `soft` | `strict`.
   final String settingsProtection;
   final int settingsUnlockMinutes;
-
-  /// `selectedApps` | `lockdown`.
-  final String blockingMode;
   final bool isEnabled;
   final int updatedAt;
   const BlockRule(
@@ -564,7 +544,6 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
       required this.studyMode,
       required this.settingsProtection,
       required this.settingsUnlockMinutes,
-      required this.blockingMode,
       required this.isEnabled,
       required this.updatedAt});
   @override
@@ -580,7 +559,6 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
     map['study_mode'] = Variable<String>(studyMode);
     map['settings_protection'] = Variable<String>(settingsProtection);
     map['settings_unlock_minutes'] = Variable<int>(settingsUnlockMinutes);
-    map['blocking_mode'] = Variable<String>(blockingMode);
     map['is_enabled'] = Variable<bool>(isEnabled);
     map['updated_at'] = Variable<int>(updatedAt);
     return map;
@@ -598,7 +576,6 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
       studyMode: Value(studyMode),
       settingsProtection: Value(settingsProtection),
       settingsUnlockMinutes: Value(settingsUnlockMinutes),
-      blockingMode: Value(blockingMode),
       isEnabled: Value(isEnabled),
       updatedAt: Value(updatedAt),
     );
@@ -621,7 +598,6 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
           serializer.fromJson<String>(json['settingsProtection']),
       settingsUnlockMinutes:
           serializer.fromJson<int>(json['settingsUnlockMinutes']),
-      blockingMode: serializer.fromJson<String>(json['blockingMode']),
       isEnabled: serializer.fromJson<bool>(json['isEnabled']),
       updatedAt: serializer.fromJson<int>(json['updatedAt']),
     );
@@ -640,7 +616,6 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
       'studyMode': serializer.toJson<String>(studyMode),
       'settingsProtection': serializer.toJson<String>(settingsProtection),
       'settingsUnlockMinutes': serializer.toJson<int>(settingsUnlockMinutes),
-      'blockingMode': serializer.toJson<String>(blockingMode),
       'isEnabled': serializer.toJson<bool>(isEnabled),
       'updatedAt': serializer.toJson<int>(updatedAt),
     };
@@ -657,7 +632,6 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
           String? studyMode,
           String? settingsProtection,
           int? settingsUnlockMinutes,
-          String? blockingMode,
           bool? isEnabled,
           int? updatedAt}) =>
       BlockRule(
@@ -673,7 +647,6 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
         settingsProtection: settingsProtection ?? this.settingsProtection,
         settingsUnlockMinutes:
             settingsUnlockMinutes ?? this.settingsUnlockMinutes,
-        blockingMode: blockingMode ?? this.blockingMode,
         isEnabled: isEnabled ?? this.isEnabled,
         updatedAt: updatedAt ?? this.updatedAt,
       );
@@ -705,9 +678,6 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
       settingsUnlockMinutes: data.settingsUnlockMinutes.present
           ? data.settingsUnlockMinutes.value
           : this.settingsUnlockMinutes,
-      blockingMode: data.blockingMode.present
-          ? data.blockingMode.value
-          : this.blockingMode,
       isEnabled: data.isEnabled.present ? data.isEnabled.value : this.isEnabled,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
@@ -726,7 +696,6 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
           ..write('studyMode: $studyMode, ')
           ..write('settingsProtection: $settingsProtection, ')
           ..write('settingsUnlockMinutes: $settingsUnlockMinutes, ')
-          ..write('blockingMode: $blockingMode, ')
           ..write('isEnabled: $isEnabled, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -745,7 +714,6 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
       studyMode,
       settingsProtection,
       settingsUnlockMinutes,
-      blockingMode,
       isEnabled,
       updatedAt);
   @override
@@ -762,7 +730,6 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
           other.studyMode == this.studyMode &&
           other.settingsProtection == this.settingsProtection &&
           other.settingsUnlockMinutes == this.settingsUnlockMinutes &&
-          other.blockingMode == this.blockingMode &&
           other.isEnabled == this.isEnabled &&
           other.updatedAt == this.updatedAt);
 }
@@ -778,7 +745,6 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
   final Value<String> studyMode;
   final Value<String> settingsProtection;
   final Value<int> settingsUnlockMinutes;
-  final Value<String> blockingMode;
   final Value<bool> isEnabled;
   final Value<int> updatedAt;
   const BlockRulesCompanion({
@@ -792,7 +758,6 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
     this.studyMode = const Value.absent(),
     this.settingsProtection = const Value.absent(),
     this.settingsUnlockMinutes = const Value.absent(),
-    this.blockingMode = const Value.absent(),
     this.isEnabled = const Value.absent(),
     this.updatedAt = const Value.absent(),
   });
@@ -807,7 +772,6 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
     this.studyMode = const Value.absent(),
     this.settingsProtection = const Value.absent(),
     this.settingsUnlockMinutes = const Value.absent(),
-    this.blockingMode = const Value.absent(),
     this.isEnabled = const Value.absent(),
     this.updatedAt = const Value.absent(),
   });
@@ -822,7 +786,6 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
     Expression<String>? studyMode,
     Expression<String>? settingsProtection,
     Expression<int>? settingsUnlockMinutes,
-    Expression<String>? blockingMode,
     Expression<bool>? isEnabled,
     Expression<int>? updatedAt,
   }) {
@@ -839,7 +802,6 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
       if (settingsProtection != null) 'settings_protection': settingsProtection,
       if (settingsUnlockMinutes != null)
         'settings_unlock_minutes': settingsUnlockMinutes,
-      if (blockingMode != null) 'blocking_mode': blockingMode,
       if (isEnabled != null) 'is_enabled': isEnabled,
       if (updatedAt != null) 'updated_at': updatedAt,
     });
@@ -856,7 +818,6 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
       Value<String>? studyMode,
       Value<String>? settingsProtection,
       Value<int>? settingsUnlockMinutes,
-      Value<String>? blockingMode,
       Value<bool>? isEnabled,
       Value<int>? updatedAt}) {
     return BlockRulesCompanion(
@@ -872,7 +833,6 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
       settingsProtection: settingsProtection ?? this.settingsProtection,
       settingsUnlockMinutes:
           settingsUnlockMinutes ?? this.settingsUnlockMinutes,
-      blockingMode: blockingMode ?? this.blockingMode,
       isEnabled: isEnabled ?? this.isEnabled,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -913,9 +873,6 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
       map['settings_unlock_minutes'] =
           Variable<int>(settingsUnlockMinutes.value);
     }
-    if (blockingMode.present) {
-      map['blocking_mode'] = Variable<String>(blockingMode.value);
-    }
     if (isEnabled.present) {
       map['is_enabled'] = Variable<bool>(isEnabled.value);
     }
@@ -938,7 +895,6 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
           ..write('studyMode: $studyMode, ')
           ..write('settingsProtection: $settingsProtection, ')
           ..write('settingsUnlockMinutes: $settingsUnlockMinutes, ')
-          ..write('blockingMode: $blockingMode, ')
           ..write('isEnabled: $isEnabled, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -1801,7 +1757,6 @@ typedef $$BlockRulesTableCreateCompanionBuilder = BlockRulesCompanion Function({
   Value<String> studyMode,
   Value<String> settingsProtection,
   Value<int> settingsUnlockMinutes,
-  Value<String> blockingMode,
   Value<bool> isEnabled,
   Value<int> updatedAt,
 });
@@ -1816,7 +1771,6 @@ typedef $$BlockRulesTableUpdateCompanionBuilder = BlockRulesCompanion Function({
   Value<String> studyMode,
   Value<String> settingsProtection,
   Value<int> settingsUnlockMinutes,
-  Value<String> blockingMode,
   Value<bool> isEnabled,
   Value<int> updatedAt,
 });
@@ -1864,9 +1818,6 @@ class $$BlockRulesTableFilterComposer
   ColumnFilters<int> get settingsUnlockMinutes => $composableBuilder(
       column: $table.settingsUnlockMinutes,
       builder: (column) => ColumnFilters(column));
-
-  ColumnFilters<String> get blockingMode => $composableBuilder(
-      column: $table.blockingMode, builder: (column) => ColumnFilters(column));
 
   ColumnFilters<bool> get isEnabled => $composableBuilder(
       column: $table.isEnabled, builder: (column) => ColumnFilters(column));
@@ -1922,10 +1873,6 @@ class $$BlockRulesTableOrderingComposer
       column: $table.settingsUnlockMinutes,
       builder: (column) => ColumnOrderings(column));
 
-  ColumnOrderings<String> get blockingMode => $composableBuilder(
-      column: $table.blockingMode,
-      builder: (column) => ColumnOrderings(column));
-
   ColumnOrderings<bool> get isEnabled => $composableBuilder(
       column: $table.isEnabled, builder: (column) => ColumnOrderings(column));
 
@@ -1972,9 +1919,6 @@ class $$BlockRulesTableAnnotationComposer
   GeneratedColumn<int> get settingsUnlockMinutes => $composableBuilder(
       column: $table.settingsUnlockMinutes, builder: (column) => column);
 
-  GeneratedColumn<String> get blockingMode => $composableBuilder(
-      column: $table.blockingMode, builder: (column) => column);
-
   GeneratedColumn<bool> get isEnabled =>
       $composableBuilder(column: $table.isEnabled, builder: (column) => column);
 
@@ -2015,7 +1959,6 @@ class $$BlockRulesTableTableManager extends RootTableManager<
             Value<String> studyMode = const Value.absent(),
             Value<String> settingsProtection = const Value.absent(),
             Value<int> settingsUnlockMinutes = const Value.absent(),
-            Value<String> blockingMode = const Value.absent(),
             Value<bool> isEnabled = const Value.absent(),
             Value<int> updatedAt = const Value.absent(),
           }) =>
@@ -2030,7 +1973,6 @@ class $$BlockRulesTableTableManager extends RootTableManager<
             studyMode: studyMode,
             settingsProtection: settingsProtection,
             settingsUnlockMinutes: settingsUnlockMinutes,
-            blockingMode: blockingMode,
             isEnabled: isEnabled,
             updatedAt: updatedAt,
           ),
@@ -2045,7 +1987,6 @@ class $$BlockRulesTableTableManager extends RootTableManager<
             Value<String> studyMode = const Value.absent(),
             Value<String> settingsProtection = const Value.absent(),
             Value<int> settingsUnlockMinutes = const Value.absent(),
-            Value<String> blockingMode = const Value.absent(),
             Value<bool> isEnabled = const Value.absent(),
             Value<int> updatedAt = const Value.absent(),
           }) =>
@@ -2060,7 +2001,6 @@ class $$BlockRulesTableTableManager extends RootTableManager<
             studyMode: studyMode,
             settingsProtection: settingsProtection,
             settingsUnlockMinutes: settingsUnlockMinutes,
-            blockingMode: blockingMode,
             isEnabled: isEnabled,
             updatedAt: updatedAt,
           ),

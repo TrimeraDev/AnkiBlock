@@ -1,4 +1,4 @@
-// Study mode, blocking mode, and settings-protection helpers.
+// Study mode and settings-protection helpers shared by Flutter + edit paths.
 
 enum StudyMode {
   dueCards,
@@ -18,42 +18,13 @@ enum StudyMode {
   }
 
   String get label => switch (this) {
-        StudyMode.dueCards => 'Anki queue',
+        StudyMode.dueCards => 'Clear learning & reviews',
         StudyMode.cardCount => 'Card count',
       };
 
   String get shortLabel => switch (this) {
-        StudyMode.dueCards => 'Anki queue',
+        StudyMode.dueCards => 'Learning & reviews',
         StudyMode.cardCount => 'Card count',
-      };
-
-  String get subtitle => switch (this) {
-        StudyMode.dueCards =>
-          'Unlock when learning & reviews are done (AnkiDroid)',
-        StudyMode.cardCount => 'Unlock after a fixed daily card goal',
-      };
-}
-
-enum BlockingMode {
-  selectedApps,
-  lockdown;
-
-  static const String selectedAppsValue = 'selectedApps';
-  static const String lockdownValue = 'lockdown';
-
-  String get storageValue => switch (this) {
-        BlockingMode.selectedApps => selectedAppsValue,
-        BlockingMode.lockdown => lockdownValue,
-      };
-
-  static BlockingMode fromStorage(String? raw) {
-    if (raw == lockdownValue) return BlockingMode.lockdown;
-    return BlockingMode.selectedApps;
-  }
-
-  String get label => switch (this) {
-        BlockingMode.selectedApps => 'Block selected apps',
-        BlockingMode.lockdown => 'Lock down phone',
       };
 }
 
@@ -87,7 +58,7 @@ enum SettingsProtection {
 
 /// Whether the active blocking goal is complete for the study day.
 ///
-/// For [StudyMode.dueCards], [obligationDue] is learn + review (not new).
+/// [obligationDue] is Anki's learning + to-review count (excludes new cards).
 bool isBlockingGoalComplete({
   required StudyMode mode,
   required int dailyCardsGoal,
@@ -111,7 +82,6 @@ enum ProtectedEditKind {
   loosenBypass,
   lowerProtection,
   switchToWeakerStudyMode,
-  weakenBlockingMode,
 }
 
 bool isWeakeningDailyGoal({required int current, required int proposed}) =>
@@ -123,8 +93,8 @@ bool isWeakeningUnlockGoal({required int current, required int proposed}) =>
 bool isWeakeningBypassCap({required int current, required int proposed}) =>
     proposed > current;
 
-bool isWeakeningBypassSeconds({required int current, required int proposed}) =>
-    proposed > current;
+/// Fixed emergency bypass window (no longer user-configurable).
+const int kBypassSeconds = 60;
 
 bool isWeakeningProtection({
   required SettingsProtection current,
@@ -138,16 +108,8 @@ bool isWeakeningProtection({
   return (rank[proposed] ?? 0) < (rank[current] ?? 0);
 }
 
-/// Lockdown → selected apps is weaker (fewer apps blocked).
-bool isWeakeningBlockingMode({
-  required BlockingMode current,
-  required BlockingMode proposed,
-}) {
-  return current == BlockingMode.lockdown &&
-      proposed == BlockingMode.selectedApps;
-}
-
-/// Switching from Anki-queue to card-count is weaker when obligation remains.
+/// Switching from due-cards to card-count is treated as weaker when learning
+/// or reviews remain (due mode requires finishing Anki's obligation).
 bool isWeakerStudyMode({
   required StudyMode current,
   required StudyMode proposed,
