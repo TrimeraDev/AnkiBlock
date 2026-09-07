@@ -12,6 +12,10 @@ object AppMonitorService {
     const val PREFS = "ankiblock_block_prefs"
     const val KEY_BLOCKED = "blocked_packages_csv"
     const val KEY_BLOCKED_NAMES = "blocked_names_csv"
+    /** JSON array of {pattern, isRegex, label} website rules. */
+    const val KEY_BLOCKED_WEBSITES_JSON = "blocked_websites_json"
+    /** When true, installed browsers not in BrowserUrlDetector are gated entirely. */
+    const val KEY_BLOCK_UNSUPPORTED_BROWSERS = "block_unsupported_browsers"
 
     const val KEY_DELEGATED_PKG = "delegated_pkg"
     const val KEY_DELEGATED_APP_NAME = "delegated_app_name"
@@ -97,6 +101,27 @@ object AppMonitorService {
             .putString(KEY_BLOCKED, pairs)
             .putString(KEY_BLOCKED_NAMES, nameLines)
             .apply()
+    }
+
+    fun setBlockedWebsites(
+        context: Context,
+        rulesJson: String,
+        blockUnsupported: Boolean,
+    ) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        prefs.edit()
+            .putString(KEY_BLOCKED_WEBSITES_JSON, rulesJson)
+            .putBoolean(KEY_BLOCK_UNSUPPORTED_BROWSERS, blockUnsupported)
+            .apply()
+        WebsiteRules.invalidateCache()
+    }
+
+    fun hasWebsiteRules(prefs: SharedPreferences): Boolean {
+        return WebsiteRules.load(prefs).isNotEmpty()
+    }
+
+    fun blockUnsupportedBrowsers(prefs: SharedPreferences): Boolean {
+        return prefs.getBoolean(KEY_BLOCK_UNSUPPORTED_BROWSERS, false)
     }
 
     fun setBlockRuleSettings(

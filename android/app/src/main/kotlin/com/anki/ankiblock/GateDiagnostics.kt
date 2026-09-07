@@ -92,11 +92,24 @@ object GateDiagnostics {
             "accessibility" to a11yEnabled,
             "batteryUnrestricted" to (protection["batteryUnrestricted"] ?: false),
             "hasBlockedApps" to (protection["hasBlockedApps"] ?: false),
+            "hasAnythingToBlock" to (protection["hasAnythingToBlock"] ?: false),
             "blockingEnabled" to (protection["blockingEnabled"] ?: false),
             "protectionActive" to (protection["protectionActive"] ?: false),
             "oemManufacturer" to (protection["oemManufacturer"] ?: "unknown"),
             // Blocking config (native mirror of Flutter block rule)
             "blockedAppCount" to blocked.size,
+            "websiteRuleCount" to WebsiteRules.load(blockPrefs).size,
+            "blockUnsupportedBrowsers" to AppMonitorService.blockUnsupportedBrowsers(blockPrefs),
+            "lastUrlCheckMs" to (AppMonitorService.engine?.lastUrlCheckAtMs() ?: 0L),
+            "lastUrlHost" to (AppMonitorService.engine?.lastInspectedUrlHost() ?: ""),
+            "supportedBrowsersInstalled" to BrowserUrlDetector.SUPPORTED_BROWSERS.keys.count {
+                try {
+                    context.packageManager.getApplicationInfo(it, 0)
+                    true
+                } catch (_: Throwable) {
+                    false
+                }
+            },
             "unlockRemainingMs" to AppMonitorService.unlockRemainingMs(blockPrefs),
             "studyMode" to (
                 blockPrefs.getString(

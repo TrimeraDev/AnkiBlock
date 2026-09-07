@@ -43,7 +43,7 @@ class CompletionOverlayManager(private val service: AccessibilityService) {
             view.findViewById<TextView>(R.id.completion_title).text =
                 "You've studied $cardsCompleted cards!"
             view.findViewById<TextView>(R.id.completion_subtitle).text =
-                "All blocked apps are unlocked for a bit. Open $appName or keep studying."
+                "All blocked apps and sites are unlocked for a bit. Open $appName or keep studying."
 
             view.findViewById<Button>(R.id.btn_open_app).apply {
                 text = "Open $appName"

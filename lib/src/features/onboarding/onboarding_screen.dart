@@ -93,7 +93,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
       unawaited(_applyAnkiDefaults());
     }
     if (usage && !hadUsage) {
-      // Prefetch while the user may still grant overlay — apps page is next.
+      // Prefetch while the user may still grant usage — apps page is next.
       unawaited(_prefetchAppsWithUsage());
     } else if (usage && _page == _appsPage) {
       unawaited(ref.read(installedAppsProvider.notifier).refresh());
@@ -161,15 +161,11 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
   }
 
   void _next() {
-    // Accessibility is required for blocking; battery helps OEM survival.
-    if (_page == _permsPage && (!_hasAccessibility || !_hasBattery)) {
-      final missing = <String>[
-        if (!_hasAccessibility) 'Accessibility',
-        if (!_hasBattery) 'Unrestricted battery',
-      ].join(', ');
+    // Accessibility is required for blocking; battery is recommended only.
+    if (_page == _permsPage && !_hasAccessibility) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Please enable: $missing'),
+        const SnackBar(
+          content: Text('Please enable Accessibility to continue'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -251,7 +247,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
                   ),
                   _SetupScrollPage(
                     title: 'Temporary unlock',
-                    subtitle: 'Cards to unlock all blocked apps for a while.',
+                    subtitle: 'Cards to unlock all blocked apps and sites for a while.',
                     child: UnlockGoalPanel(
                       initial: unlockGoal,
                       showTitle: false,
@@ -280,8 +276,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
                   _SetupScrollPage(
                     title: 'What to block',
                     subtitle: _hasUsage
-                        ? 'Sorted by your screen time.'
-                        : 'Suggested apps. Adjust anytime.',
+                        ? 'Pick apps now. You can also block websites (YouTube Shorts, Reddit, …) anytime under Blocking → Websites.'
+                        : 'Suggested apps. You can also block websites anytime under Blocking → Websites.',
                     expandChild: true,
                     child: AppBlockSetupPanel(
                       showUsage: _hasUsage,
@@ -404,7 +400,7 @@ class _IntroPage extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           Text(
-            'AnkiDroid reviews unlock your apps.',
+            'AnkiDroid reviews unlock your apps and sites.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                   color: AppTheme.onSurfaceVariant,
@@ -514,7 +510,7 @@ class _BlockingPermissionsPage extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'Accessibility detects blocked apps instantly and shows the study gate.',
+            'Accessibility detects blocked apps and websites instantly and shows the study gate.',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: AppTheme.onSurfaceVariant,
                 ),

@@ -28,6 +28,7 @@ class TodayScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final blockedAppsAsync = ref.watch(activeBlockedAppsProvider);
+    final blockedSitesAsync = ref.watch(activeBlockedWebsitesProvider);
     final installedAsync = ref.watch(installedAppsProvider);
     final today = studyDayKey();
     final dailyStatsAsync = ref.watch(dailyStatsProvider(today));
@@ -145,6 +146,7 @@ class TodayScreen extends ConsumerWidget {
               const SizedBox(height: 12),
               _BlockedAppsSection(
                 blockedAppsAsync: blockedAppsAsync,
+                blockedSitesAsync: blockedSitesAsync,
                 installedAsync: installedAsync,
               ),
               const SizedBox(height: 12),
@@ -408,7 +410,7 @@ class _DailyGoalSection extends StatelessWidget {
       icon: Icons.calendar_today_outlined,
       iconColor: AppTheme.primary,
       title: 'Daily card goal',
-      subtitle: '$goal cards · all apps open until 3am',
+      subtitle: '$goal cards · apps & sites open until 3am',
       onTap: () => _showDailyGoalSheet(context, goal),
     );
   }
@@ -476,29 +478,51 @@ class _UnlockGoalSection extends StatelessWidget {
 
 class _BlockedAppsSection extends StatelessWidget {
   final AsyncValue<List<db.BlockedApp>> blockedAppsAsync;
+  final AsyncValue<List<db.BlockedWebsite>> blockedSitesAsync;
   final AsyncValue<List<InstalledApp>> installedAsync;
 
   const _BlockedAppsSection({
     required this.blockedAppsAsync,
+    required this.blockedSitesAsync,
     required this.installedAsync,
   });
 
   @override
   Widget build(BuildContext context) {
     final blocked = blockedAppsAsync.valueOrNull ?? const [];
+    final sites = blockedSitesAsync.valueOrNull ?? const [];
     final installed = installedAsync.valueOrNull ?? const [];
     final iconByPkg = {for (final a in installed) a.packageName: a.icon};
     final names = blocked.map((b) => b.displayName).toList();
+    final total = blocked.length + sites.length;
+
+    String subtitle;
+    if (total == 0) {
+      subtitle = 'None selected — tap to block distractions';
+    } else if (blocked.isEmpty && sites.length == 1) {
+      subtitle = sites.first.pattern;
+    } else if (sites.isEmpty && blocked.length == 1) {
+      subtitle = names.first;
+    } else {
+      final parts = <String>[];
+      if (blocked.isNotEmpty) {
+        parts.add(
+          blocked.length == 1 ? '1 app' : '${blocked.length} apps',
+        );
+      }
+      if (sites.isNotEmpty) {
+        parts.add(
+          sites.length == 1 ? '1 site' : '${sites.length} sites',
+        );
+      }
+      subtitle = '${parts.join(' · ')} locked';
+    }
 
     return _SetupTile(
       icon: Icons.lock_outline,
       iconColor: AppTheme.primary,
-      title: 'Blocked apps',
-      subtitle: blocked.isEmpty
-          ? 'None selected — tap to block distractions'
-          : blocked.length == 1
-              ? names.first
-              : '${blocked.length} apps locked',
+      title: 'Blocked apps & sites',
+      subtitle: subtitle,
       onTap: () => context.push('/blocking'),
       trailing: blocked.isEmpty
           ? null

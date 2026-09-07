@@ -16,7 +16,7 @@ object MonitorBootstrap {
 
     /** True when blocking is configured such that the a11y service should be gating. */
     fun shouldStartMonitor(context: Context): Boolean {
-        if (!hasBlockedPackages(context)) return false
+        if (!hasAnythingToBlock(context)) return false
         if (!AppMonitorService.isBlockingEnabled(context)) return false
         if (!AnkiBlockAccessibilityService.isEnabled(context)) return false
         return true
@@ -26,6 +26,13 @@ object MonitorBootstrap {
         val prefs = context.getSharedPreferences(AppMonitorService.PREFS, Context.MODE_PRIVATE)
         val blocked = prefs.getString(AppMonitorService.KEY_BLOCKED, "") ?: ""
         return blocked.isNotEmpty()
+    }
+
+    /** Apps and/or website rules — anything that needs the Accessibility gate. */
+    fun hasAnythingToBlock(context: Context): Boolean {
+        if (hasBlockedPackages(context)) return true
+        val prefs = context.getSharedPreferences(AppMonitorService.PREFS, Context.MODE_PRIVATE)
+        return AppMonitorService.hasWebsiteRules(prefs)
     }
 
     fun hasUsageAccess(context: Context): Boolean {

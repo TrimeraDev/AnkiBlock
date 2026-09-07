@@ -235,7 +235,7 @@ class _UnlockGoalPanelState extends ConsumerState<UnlockGoalPanel> {
           Text('Temporary unlock', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 4),
           Text(
-            'Short unlock for all blocked apps — not the whole day.',
+            'Short unlock for all blocked apps and sites — not the whole day.',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 16),
@@ -384,8 +384,8 @@ class AppBlockSetupPanel extends ConsumerWidget {
       error: (e, _) => Padding(
         padding: padding ?? EdgeInsets.zero,
         child: Text(
-          'Could not load apps. Grant Usage Access in the previous step, '
-          'then try again.\n$e',
+          'Could not load apps. Pull to refresh, or open Permissions '
+          'if the list stays empty.\n$e',
           style: Theme.of(context).textTheme.bodySmall,
         ),
       ),

@@ -201,3 +201,93 @@ Future<void> syncBlockedPackagesToNative(WidgetRef ref) async {
   await syncStudyScopeToNative(ref);
   await syncBlockRuleToNative(ref);
 }
+
+Future<void> syncBlockedWebsitesToNative(WidgetRef ref) async {
+  final db = ref.read(databaseProvider);
+  final all = await db.watchAllBlockedWebsites().first;
+  final rule = await ref.read(blockRuleProvider.future);
+  final active = all
+      .where((b) => b.isBlocked)
+      .map((b) => (
+            pattern: b.pattern,
+            isRegex: b.isRegex,
+            label: b.label.isEmpty ? b.pattern : b.label,
+          ))
+      .toList();
+  await ref.read(appsServiceProvider).setBlockedWebsites(
+        rules: active,
+        blockUnsupportedBrowsers: rule?.blockUnsupportedBrowsers ?? false,
+      );
+}
+
+Future<void> addBlockedWebsite(
+  WidgetRef ref, {
+  required String pattern,
+  required bool isRegex,
+  String? label,
+}) async {
+  final db = ref.read(databaseProvider);
+  final trimmed = pattern.trim();
+  await db.insertBlockedWebsite(BlockedWebsitesCompanion.insert(
+    pattern: trimmed,
+    isRegex: Value(isRegex),
+    label: (label ?? trimmed).trim().isEmpty ? trimmed : (label ?? trimmed).trim(),
+    isBlocked: const Value(true),
+  ));
+  await syncBlockedWebsitesToNative(ref);
+}
+
+Future<void> toggleWebsiteBlocked(
+  WidgetRef ref, {
+  required int id,
+  required bool blocked,
+  BuildContext? context,
+}) async {
+  if (!blocked && context != null && context.mounted) {
+    final ok = await ref
+        .read(settingsProtectionServiceProvider)
+        .requestProtectedEdit(
+          ref,
+          context,
+          kind: ProtectedEditKind.unblockApp,
+        );
+    if (!ok) return;
+  }
+  final db = ref.read(databaseProvider);
+  await db.setWebsiteBlocked(id, blocked);
+  await syncBlockedWebsitesToNative(ref);
+}
+
+Future<void> deleteWebsiteRule(
+  WidgetRef ref, {
+  required int id,
+  BuildContext? context,
+}) async {
+  if (context != null && context.mounted) {
+    final ok = await ref
+        .read(settingsProtectionServiceProvider)
+        .requestProtectedEdit(
+          ref,
+          context,
+          kind: ProtectedEditKind.unblockApp,
+        );
+    if (!ok) return;
+  }
+  final db = ref.read(databaseProvider);
+  await db.deleteBlockedWebsite(id);
+  await syncBlockedWebsitesToNative(ref);
+}
+
+Future<void> updateBlockUnsupportedBrowsers(
+  WidgetRef ref,
+  bool value,
+) async {
+  final db = ref.read(databaseProvider);
+  await db.updateBlockRule(BlockRulesCompanion(
+    id: const Value(1),
+    blockUnsupportedBrowsers: Value(value),
+    updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
+  ));
+  ref.invalidate(blockRuleProvider);
+  await syncBlockedWebsitesToNative(ref);
+}

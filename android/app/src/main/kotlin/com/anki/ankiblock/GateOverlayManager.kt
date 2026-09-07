@@ -51,12 +51,16 @@ class GateOverlayManager(
     var packageName: String? = null
         private set
 
+    /** True when the gate was shown for a blocked website (not a blocked app). */
+    var isWebsiteGate: Boolean = false
+        private set
+
     val isShowing: Boolean get() = view != null
 
     fun isShowingFor(pkg: String): Boolean = view != null && packageName == pkg
 
-    fun show(pkg: String, appName: String) {
-        mainHandler.post { showInternal(pkg, appName) }
+    fun show(pkg: String, appName: String, website: Boolean = false) {
+        mainHandler.post { showInternal(pkg, appName, website) }
     }
 
     fun dismiss() {
@@ -199,17 +203,18 @@ class GateOverlayManager(
         }
     }
 
-    private fun showInternal(pkg: String, appName: String) {
-        if (isShowingFor(pkg)) return
+    private fun showInternal(pkg: String, appName: String, website: Boolean) {
+        if (isShowingFor(pkg) && isWebsiteGate == website) return
         dismissInternal()
         val token = ++showToken
         packageName = pkg
+        isWebsiteGate = website
 
         val root = LayoutInflater.from(service).inflate(R.layout.overlay_gate, null)
         // Instant paint from prefs; Anki counts fill in asynchronously.
         val quick = buildModel(pkg, withAnki = false)
         render(root, appName, quick)
-        wireActions(root, pkg, appName, quick)
+        wireActions(root, pkg, appName, quick, website)
 
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
@@ -225,13 +230,14 @@ class GateOverlayManager(
             Log.e(TAG, "gate addView failed for $appName", e)
             GateDiagnostics.recordError(service, "gate addView: ${e.message}")
             packageName = null
+            isWebsiteGate = false
             return
         }
         view = root
         root.requestFocus()
         GateDiagnostics.recordGateShown(service)
         GateStats.recordBlockedAttempt(service)
-        Log.i(TAG, "gate shown for $appName ($pkg)")
+        Log.i(TAG, "gate shown for $appName ($pkg) website=$website")
 
         io.execute {
             val full = try {
@@ -243,7 +249,7 @@ class GateOverlayManager(
             mainHandler.post {
                 if (token != showToken || view !== root) return@post
                 render(root, appName, full)
-                wireActions(root, pkg, appName, full)
+                wireActions(root, pkg, appName, full, website)
             }
         }
     }
@@ -252,6 +258,7 @@ class GateOverlayManager(
         cancelBypassHold()
         val v = view ?: run {
             packageName = null
+            isWebsiteGate = false
             return
         }
         try {
@@ -260,11 +267,18 @@ class GateOverlayManager(
         }
         view = null
         packageName = null
+        isWebsiteGate = false
     }
 
     // --------------------------------------------------------------- actions
 
-    private fun wireActions(root: View, pkg: String, appName: String, m: Model) {
+    private fun wireActions(
+        root: View,
+        pkg: String,
+        appName: String,
+        m: Model,
+        website: Boolean,
+    ) {
         root.findViewById<Button>(R.id.gate_btn_study).setOnClickListener {
             if (!m.ankiReady || !m.hasScope) {
                 openAnkiBlock()
@@ -283,10 +297,17 @@ class GateOverlayManager(
 
         root.setOnKeyListener { _, keyCode, event ->
             if (keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
-                // Back = leave the blocked app, not peek at it.
-                service.performGlobalAction(
-                    android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME,
-                )
+                if (website) {
+                    // Navigate the tab back; next URL check re-gates if still blocked.
+                    service.performGlobalAction(
+                        android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK,
+                    )
+                } else {
+                    // Back = leave the blocked app, not peek at it.
+                    service.performGlobalAction(
+                        android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME,
+                    )
+                }
                 dismissInternal()
                 true
             } else {

@@ -40,21 +40,34 @@
       </p>
 
       <p>
-        AnkiBlock is a study gate for Android: it blocks apps you choose until you
-        complete enough Anki cards. Your flashcards, notes, media, and review
-        history stay in <strong>AnkiDroid</strong>. AnkiBlock never hosts your
-        collection and does not replace AnkiDroid’s reviewer — it reads your
-        real study progress through AnkiDroid’s documented
-        <strong>on-device API</strong> and unlocks apps when you have earned it.
+        AnkiBlock is a study gate for Android: it blocks apps and websites you
+        choose until you complete enough Anki cards. Your flashcards, notes,
+        media, and review history stay in <strong>AnkiDroid</strong>. AnkiBlock
+        never hosts your collection and does not replace AnkiDroid’s reviewer —
+        it reads your real study progress through AnkiDroid’s documented
+        <strong>on-device API</strong> and unlocks distractions when you have
+        earned it.
       </p>
 
       <h2>At a glance</h2>
       <ol>
         <li>You install AnkiDroid and grant AnkiBlock database access.</li>
-        <li>You pick which apps to block and how many cards unlock each one.</li>
-        <li>When a blocked app opens, AnkiBlock sends you to study in AnkiDroid.</li>
-        <li>AnkiBlock polls AnkiDroid locally to count valid reviews.</li>
-        <li>When you hit your goal, you get a timed unlock for that app.</li>
+        <li>
+          You pick apps and websites to block, and how many cards unlock them
+          all for a timed window.
+        </li>
+        <li>
+          When a blocked app or site opens, AnkiBlock shows a study gate over
+          it.
+        </li>
+        <li>
+          AnkiBlock tracks reviews locally via AnkiDroid’s ContentProvider while
+          you study.
+        </li>
+        <li>
+          When you hit your goal, you get a timed unlock for all blocked apps
+          and websites.
+        </li>
       </ol>
 
       <h2>AnkiDroid stays your flashcard app</h2>
@@ -178,12 +191,12 @@
         treats as not credited. On learning or relearning cards, “Again” often
         reschedules the card within a few minutes without bumping lapses; those
         short-cycle Agains are ignored too, so only real forward progress
-        unlocks your apps.
+        unlocks your apps and sites.
       </p>
       <p>
         When credited reviews reach your target, AnkiBlock shows a completion
-        overlay (even on top of AnkiDroid) and grants a timed unlock for the
-        blocked app you were trying to open.
+        overlay (even on top of AnkiDroid) and grants a timed unlock for all
+        blocked apps and websites.
       </p>
 
       <h2>Passive study</h2>
@@ -219,14 +232,21 @@
         with whatever you changed in AnkiDroid itself.
       </p>
 
-      <h2>App blocking (separate from AnkiDroid)</h2>
+      <h2>App and website blocking (separate from AnkiDroid)</h2>
       <p>
-        Blocking uses Android’s
-        <code>UsageStatsManager</code> to notice when a blocked app comes to the
-        foreground, then routes you to AnkiBlock’s study gate. That layer is
-        independent of the AnkiDroid API — it only decides <em>when</em> to ask
-        you to study. The AnkiDroid integration decides <em>whether</em> you have
-        studied enough.
+        Blocking uses Android’s <strong>Accessibility service</strong> to notice
+        when a blocked app comes to the foreground, and — in supported browsers —
+        to read only the address-bar URL so website rules you configure can be
+        enforced. The study gate is drawn as an accessibility overlay; no
+        “display over other apps” permission is required. Optional
+        <strong>Usage Access</strong> is used only for screen-time stats in the
+        app picker, not for detecting blocks.
+      </p>
+      <p>
+        That layer is independent of the AnkiDroid API — it only decides
+        <em>when</em> to ask you to study. The AnkiDroid integration decides
+        <em>whether</em> you have studied enough. An unlock window applies
+        globally to every blocked app and website until it expires.
       </p>
 
       <h2>Privacy summary</h2>

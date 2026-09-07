@@ -13,8 +13,9 @@ object ProtectionStatus {
         val batteryUnrestricted = isIgnoringBatteryOptimizations(context)
         val engineConnected = AppMonitorService.isRunning()
         val hasBlockedApps = MonitorBootstrap.hasBlockedPackages(context)
+        val hasAnythingToBlock = MonitorBootstrap.hasAnythingToBlock(context)
         val blockingEnabled = AppMonitorService.isBlockingEnabled(context)
-        val protectionActive = hasBlockedApps &&
+        val protectionActive = hasAnythingToBlock &&
             blockingEnabled &&
             accessibility &&
             engineConnected
@@ -25,6 +26,7 @@ object ProtectionStatus {
             "batteryUnrestricted" to batteryUnrestricted,
             "monitorRunning" to (accessibility && engineConnected),
             "hasBlockedApps" to hasBlockedApps,
+            "hasAnythingToBlock" to hasAnythingToBlock,
             "blockingEnabled" to blockingEnabled,
             "protectionActive" to protectionActive,
             "oemManufacturer" to OemSettings.manufacturerKey(),

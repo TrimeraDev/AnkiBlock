@@ -102,6 +102,42 @@ class MainActivity : FlutterActivity() {
                     AppMonitorService.setBlockedPackages(this, pkgs, names)
                     result.success(true)
                 }
+                "setBlockedWebsites" -> {
+                    @Suppress("UNCHECKED_CAST")
+                    val rulesArg = call.argument<List<Map<String, Any?>>>("rules")
+                        ?: emptyList()
+                    val blockUnsupported =
+                        call.argument<Boolean>("blockUnsupportedBrowsers") ?: false
+                    val rules = rulesArg.mapNotNull { m ->
+                        val pattern = (m["pattern"] as? String)?.trim().orEmpty()
+                        if (pattern.isEmpty()) return@mapNotNull null
+                        WebsiteRules.Rule(
+                            pattern = pattern,
+                            isRegex = m["isRegex"] as? Boolean ?: false,
+                            label = (m["label"] as? String)?.ifBlank { pattern } ?: pattern,
+                        )
+                    }
+                    AppMonitorService.setBlockedWebsites(
+                        this,
+                        WebsiteRules.toJson(rules),
+                        blockUnsupported,
+                    )
+                    result.success(true)
+                }
+                "getSupportedBrowsers" -> {
+                    val compat = BrowserUrlDetector.browserCompatibility(this)
+                    result.success(
+                        mapOf(
+                            "supportedInstalled" to compat.supportedInstalled.map {
+                                mapOf("packageName" to it.packageName, "appName" to it.appName)
+                            },
+                            "unsupportedInstalled" to compat.unsupportedInstalled.map {
+                                mapOf("packageName" to it.packageName, "appName" to it.appName)
+                            },
+                            "supportedCatalog" to compat.supportedCatalog,
+                        ),
+                    )
+                }
                 "getGateDiagnostics" -> {
                     result.success(GateDiagnostics.snapshot(this))
                 }

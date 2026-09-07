@@ -2,7 +2,7 @@
 
 **Study first. Unlock freedom.**
 
-AnkiBlock blocks distracting Android apps until you complete your Anki cards in [AnkiDroid](https://play.google.com/store/apps/details?id=com.ichi2.anki). Your flashcards stay in AnkiDroid — AnkiBlock reads your real study progress locally and enforces the gate.
+AnkiBlock blocks distracting Android apps and websites until you complete your Anki cards in [AnkiDroid](https://play.google.com/store/apps/details?id=com.ichi2.anki). Your flashcards stay in AnkiDroid — AnkiBlock reads your real study progress locally and enforces the gate.
 
 - **Website:** [trimeradev.github.io/AnkiBlock](https://trimeradev.github.io/AnkiBlock/)
 - **Privacy policy:** [trimeradev.github.io/AnkiBlock/privacy.html](https://trimeradev.github.io/AnkiBlock/privacy.html)
@@ -13,6 +13,7 @@ AnkiBlock is a non-commercial open-source project published by Simon & Vincent U
 ## Features
 
 - Block chosen apps (social media, games, etc.) behind a study gate
+- Block websites in supported browsers (domains and paths, optional regex)
 - Connect to AnkiDroid via its public ContentProvider API
 - Set cards required per unlock, daily goals, and unlock duration
 - Choose which AnkiDroid decks count toward your queue
@@ -25,7 +26,7 @@ AnkiBlock is a non-commercial open-source project published by Simon & Vincent U
 - **[Flutter](https://docs.flutter.dev/get-started/install)** 3.22+ and Dart 3.4+
 - Android SDK with JDK 17 (for native Android builds)
 
-AnkiBlock also needs Android permissions for usage access, overlay display, and AnkiDroid database access. The app guides you through granting these during onboarding.
+AnkiBlock needs **Accessibility** (required for app and website blocking), optional **Usage Access** (screen-time stats), and **AnkiDroid database access**. The app guides you through granting these during onboarding.
 
 ## Getting started
 
@@ -57,7 +58,7 @@ dart run build_runner build --delete-conflicting-outputs
 | Layer | Role |
 |-------|------|
 | **Flutter (Dart)** | UI, settings, local SQLite via Drift, Riverpod state |
-| **Android (Kotlin)** | App monitor service, study gate overlay, AnkiDroid ContentProvider bridge |
+| **Android (Kotlin)** | AccessibilityService engine, native study gate overlay, browser URL detection, AnkiDroid ContentProvider bridge |
 
 AnkiDroid remains the source of truth for cards, decks, and scheduling. AnkiBlock only stores blocker settings and daily stats.
 

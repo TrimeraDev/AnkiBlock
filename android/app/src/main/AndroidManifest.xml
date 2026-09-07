@@ -71,6 +71,13 @@
              installed via PackageManager. -->
         <package android:name="com.ichi2.anki" />
         <provider android:authorities="com.ichi2.anki.flashcards" />
+        <!-- Required on Android 11+ to discover installed browsers for
+             website blocking (supported list + unsupported-browser option). -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" />

@@ -11,14 +11,15 @@ import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 
 /**
- * Event-driven app blocker: detects foreground package changes via
- * Accessibility events, draws the native study gate over blocked apps, and
- * tracks AnkiDroid reviews with ContentObserver + a short foreground-only poll.
+ * Event-driven blocker: detects foreground package changes via Accessibility
+ * events, reads browser address bars for website rules, draws the native study
+ * gate, and tracks AnkiDroid reviews with ContentObserver + a short poll.
  */
 class AnkiBlockAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val TAG = "AnkiBlock.A11y"
+        private const val URL_CHECK_THROTTLE_MS = 400L
 
         /** Windows from these packages never count as "the user switched app". */
         private val TRANSIENT_PACKAGES = setOf(
@@ -54,6 +55,10 @@ class AnkiBlockAccessibilityService : AccessibilityService() {
     private var studyTrackingActive = false
     private var contentObserverRegistered = false
     private var scheduledExpireRunnable: Runnable? = null
+    private var scheduledUrlCheckRunnable: Runnable? = null
+    private var pendingUrlCheckPkg: String? = null
+    private var lastUrlCheckMs = 0L
+    private var lastUrlHost: String = ""
 
     private val studyPollRunnable = object : Runnable {
         override fun run() {
@@ -93,6 +98,8 @@ class AnkiBlockAccessibilityService : AccessibilityService() {
         gateOverlay = GateOverlayManager(this, api)
         AppMonitorService.bindEngine(this)
         AppMonitorService.lastEventMs = System.currentTimeMillis()
+        BrowserUrlDetector.invalidateInstalledBrowsersCache()
+        BrowserUrlDetector.installedBrowsers(this)
         clearStaleDelegatedSession()
         repairPassiveMergeState()
         ensureStudyDayRollover()
@@ -127,17 +134,21 @@ class AnkiBlockAccessibilityService : AccessibilityService() {
         // dialogs) don't change which app the user is in.
         if (pkg == packageName || pkg in TRANSIENT_PACKAGES) return
 
-        // Ignore noisy content-changed events from non-Anki packages.
-        if (type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
-            pkg != AppMonitorService.ANKIDROID_PACKAGE
-        ) {
-            return
+        // Ignore noisy content-changed events except AnkiDroid (study tracking)
+        // and supported browsers (website rules).
+        if (type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+            val allowBrowser = BrowserUrlDetector.isSupportedBrowser(pkg) &&
+                AppMonitorService.hasWebsiteRules(prefs)
+            if (pkg != AppMonitorService.ANKIDROID_PACKAGE && !allowBrowser) {
+                return
+            }
         }
 
         val previous = currentForegroundPackage
         currentForegroundPackage = pkg
         if (previous != pkg) {
             cancelUnlockExpiryCheck()
+            cancelUrlCheck()
             // User moved to a different app: the gate for the previous one is moot.
             if (gateOverlay.isShowing && !gateOverlay.isShowingFor(pkg)) {
                 gateOverlay.dismiss()
@@ -159,18 +170,31 @@ class AnkiBlockAccessibilityService : AccessibilityService() {
             maybeStopStudyTracking()
         }
 
+        if (BrowserUrlDetector.isSupportedBrowser(pkg) &&
+            AppMonitorService.hasWebsiteRules(prefs)
+        ) {
+            scheduleUrlCheck(pkg)
+            return
+        }
+
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            checkBlockedAppGate(pkg)
+            if (shouldGateUnsupportedBrowser(pkg)) {
+                checkUnsupportedBrowserGate(pkg)
+            } else {
+                checkBlockedAppGate(pkg)
+            }
         }
     }
 
     override fun onInterrupt() {
         cancelUnlockExpiryCheck()
+        cancelUrlCheck()
         Log.i(TAG, "AccessibilityService interrupted")
     }
 
     override fun onDestroy() {
         cancelUnlockExpiryCheck()
+        cancelUrlCheck()
         stopStudyTracking()
         overlayManager.dismiss()
         gateOverlay.dismiss()
@@ -183,6 +207,12 @@ class AnkiBlockAccessibilityService : AccessibilityService() {
     fun isGateShowing(): Boolean = gateOverlay.isShowing
 
     fun dismissGate() = gateOverlay.dismiss()
+
+    /** Diagnostics: last URL host we inspected (no path). */
+    fun lastInspectedUrlHost(): String = lastUrlHost
+
+    /** Diagnostics: wall-clock of last URL bar read. */
+    fun lastUrlCheckAtMs(): Long = lastUrlCheckMs
 
     /**
      * An unlock window was just granted (bypass / bout / session) while a
@@ -743,12 +773,118 @@ class AnkiBlockAccessibilityService : AccessibilityService() {
             return
         }
 
-        showGate(pkg, displayName)
+        showGate(pkg, displayName, website = false)
+    }
+
+    private fun shouldGateUnsupportedBrowser(pkg: String): Boolean {
+        if (!AppMonitorService.hasWebsiteRules(prefs)) return false
+        if (!AppMonitorService.blockUnsupportedBrowsers(prefs)) return false
+        if (BrowserUrlDetector.isSupportedBrowser(pkg)) return false
+        return pkg in BrowserUrlDetector.installedBrowsers(this)
+    }
+
+    private fun checkUnsupportedBrowserGate(pkg: String) {
+        if (gateOverlay.isShowingFor(pkg)) return
+        if (!AppMonitorService.isBlockingEnabled(this)) return
+        if (isBlockingGoalComplete()) return
+        val remaining = AppMonitorService.unlockRemainingMs(prefs)
+        if (remaining > 0L) {
+            scheduleUnlockExpiryCheck(remaining)
+            return
+        }
+        val browserName = lookupInstalledAppName(pkg) ?: pkg
+        val displayName = "Unsupported browser · $browserName"
+        if (AppMonitorService.tryUnlockFromRecentBout(
+                this,
+                pkg,
+                displayName,
+                AppMonitorService.unlockGoal(prefs),
+            )
+        ) {
+            Log.i(TAG, "skipped gate — recent study bout unlocked $displayName")
+            return
+        }
+        showGate(pkg, displayName, website = false)
+    }
+
+    private fun scheduleUrlCheck(pkg: String) {
+        pendingUrlCheckPkg = pkg
+        if (scheduledUrlCheckRunnable != null) return
+        val elapsed = System.currentTimeMillis() - lastUrlCheckMs
+        val delay = (URL_CHECK_THROTTLE_MS - elapsed).coerceAtLeast(0L)
+        val r = Runnable {
+            scheduledUrlCheckRunnable = null
+            val target = pendingUrlCheckPkg ?: return@Runnable
+            pendingUrlCheckPkg = null
+            runUrlCheck(target)
+        }
+        scheduledUrlCheckRunnable = r
+        handler.postDelayed(r, delay)
+    }
+
+    private fun cancelUrlCheck() {
+        scheduledUrlCheckRunnable?.let { handler.removeCallbacks(it) }
+        scheduledUrlCheckRunnable = null
+        pendingUrlCheckPkg = null
+    }
+
+    private fun runUrlCheck(pkg: String) {
+        if (currentForegroundPackage != pkg) return
+        if (!AppMonitorService.hasWebsiteRules(prefs)) return
+        lastUrlCheckMs = System.currentTimeMillis()
+        val raw = try {
+            BrowserUrlDetector.readUrl(this, pkg)
+        } catch (e: Throwable) {
+            Log.w(TAG, "readUrl failed for $pkg", e)
+            GateDiagnostics.recordError(this, "readUrl: ${e.message}")
+            null
+        }
+        if (raw == null) return
+        val host = WebsiteRules.hostOf(WebsiteRules.normalize(raw))
+        lastUrlHost = host
+        checkBlockedWebsiteGate(pkg, raw)
+    }
+
+    private fun checkBlockedWebsiteGate(pkg: String, rawUrl: String) {
+        if (!AppMonitorService.isBlockingEnabled(this)) return
+        val rules = WebsiteRules.load(prefs)
+        val matched = WebsiteRules.match(rawUrl, rules)
+        if (matched == null) {
+            // Navigated away from a blocked site in this browser.
+            if (gateOverlay.isShowingFor(pkg) && gateOverlay.isWebsiteGate) {
+                gateOverlay.dismiss()
+            }
+            return
+        }
+        if (isBlockingGoalComplete()) return
+        val remaining = AppMonitorService.unlockRemainingMs(prefs)
+        if (remaining > 0L) {
+            scheduleUnlockExpiryCheck(remaining)
+            return
+        }
+        val host = WebsiteRules.hostOf(WebsiteRules.normalize(rawUrl))
+        val browserName = lookupInstalledAppName(pkg) ?: pkg
+        val displayName = "${matched.label.ifBlank { host }} · $browserName"
+        if (gateOverlay.isShowingFor(pkg) && gateOverlay.isWebsiteGate) {
+            // Already covering this browser; refresh label if host changed.
+            return
+        }
+        if (AppMonitorService.tryUnlockFromRecentBout(
+                this,
+                pkg,
+                displayName,
+                AppMonitorService.unlockGoal(prefs),
+            )
+        ) {
+            Log.i(TAG, "skipped website gate — recent study bout unlocked $displayName")
+            return
+        }
+        showGate(pkg, displayName, website = true)
     }
 
     /**
-     * When the unlock window ends, re-gate whatever blocked app is in the
-     * foreground at that moment (the user may have switched apps meanwhile).
+     * When the unlock window ends, re-gate whatever blocked app / website is
+     * in the foreground at that moment.
      */
     private fun scheduleUnlockExpiryCheck(delayMs: Long) {
         cancelUnlockExpiryCheck()
@@ -761,11 +897,21 @@ class AnkiBlockAccessibilityService : AccessibilityService() {
                 return@Runnable
             }
             prefs.edit().remove(AppMonitorService.KEY_UNLOCK_UNTIL).apply()
-            if (isBlockedPackage(pkg) &&
-                !isBlockingGoalComplete() &&
-                AppMonitorService.isBlockingEnabled(this)
+            if (!AppMonitorService.isBlockingEnabled(this) || isBlockingGoalComplete()) {
+                return@Runnable
+            }
+            if (BrowserUrlDetector.isSupportedBrowser(pkg) &&
+                AppMonitorService.hasWebsiteRules(prefs)
             ) {
-                showGate(pkg, lookupDisplayName(pkg) ?: pkg)
+                scheduleUrlCheck(pkg)
+                return@Runnable
+            }
+            if (shouldGateUnsupportedBrowser(pkg)) {
+                checkUnsupportedBrowserGate(pkg)
+                return@Runnable
+            }
+            if (isBlockedPackage(pkg)) {
+                showGate(pkg, lookupDisplayName(pkg) ?: pkg, website = false)
             }
         }
         scheduledExpireRunnable = r
@@ -795,8 +941,17 @@ class AnkiBlockAccessibilityService : AccessibilityService() {
         return null
     }
 
-    private fun showGate(pkg: String, displayName: String) {
-        Log.i(TAG, "showGate $displayName ($pkg)")
-        gateOverlay.show(pkg, displayName)
+    private fun lookupInstalledAppName(pkg: String): String? {
+        return try {
+            val ai = packageManager.getApplicationInfo(pkg, 0)
+            packageManager.getApplicationLabel(ai)?.toString()
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private fun showGate(pkg: String, displayName: String, website: Boolean = false) {
+        Log.i(TAG, "showGate $displayName ($pkg) website=$website")
+        gateOverlay.show(pkg, displayName, website)
     }
 }

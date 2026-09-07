@@ -30,6 +30,58 @@ class InstalledApp {
       );
 }
 
+class BrowserEntry {
+  const BrowserEntry({required this.packageName, required this.appName});
+
+  final String packageName;
+  final String appName;
+
+  factory BrowserEntry.fromMap(Map<dynamic, dynamic> map) {
+    return BrowserEntry(
+      packageName: map['packageName']?.toString() ?? '',
+      appName: map['appName']?.toString() ?? '',
+    );
+  }
+}
+
+class BrowserCompatibility {
+  const BrowserCompatibility({
+    required this.supportedInstalled,
+    required this.unsupportedInstalled,
+    required this.supportedCatalog,
+  });
+
+  final List<BrowserEntry> supportedInstalled;
+  final List<BrowserEntry> unsupportedInstalled;
+  final List<String> supportedCatalog;
+
+  static const empty = BrowserCompatibility(
+    supportedInstalled: [],
+    unsupportedInstalled: [],
+    supportedCatalog: [],
+  );
+
+  factory BrowserCompatibility.fromMap(Map<dynamic, dynamic>? map) {
+    if (map == null) return empty;
+    return BrowserCompatibility(
+      supportedInstalled: _entries(map['supportedInstalled']),
+      unsupportedInstalled: _entries(map['unsupportedInstalled']),
+      supportedCatalog: (map['supportedCatalog'] as List<dynamic>? ?? const [])
+          .map((e) => e.toString())
+          .toList(),
+    );
+  }
+
+  static List<BrowserEntry> _entries(dynamic raw) {
+    if (raw is! List) return const [];
+    return raw
+        .whereType<Map>()
+        .map((m) => BrowserEntry.fromMap(m))
+        .where((e) => e.packageName.isNotEmpty)
+        .toList();
+  }
+}
+
 extension InstalledAppCacheX on InstalledApp {
   InstalledAppsCacheCompanion toCacheCompanion() => InstalledAppsCacheCompanion(
         packageName: Value(packageName),
@@ -206,6 +258,32 @@ class AppsService {
       'packages': packages,
       'names': names,
     });
+  }
+
+  Future<void> setBlockedWebsites({
+    required List<({String pattern, bool isRegex, String label})> rules,
+    required bool blockUnsupportedBrowsers,
+  }) async {
+    if (!Platform.isAndroid) return;
+    await _channel.invokeMethod('setBlockedWebsites', {
+      'rules': [
+        for (final r in rules)
+          {
+            'pattern': r.pattern,
+            'isRegex': r.isRegex,
+            'label': r.label,
+          },
+      ],
+      'blockUnsupportedBrowsers': blockUnsupportedBrowsers,
+    });
+  }
+
+  Future<BrowserCompatibility> getBrowserCompatibility() async {
+    if (!Platform.isAndroid) return BrowserCompatibility.empty;
+    final raw = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+      'getSupportedBrowsers',
+    );
+    return BrowserCompatibility.fromMap(raw);
   }
 
   Future<void> syncBlockRuleSettings({

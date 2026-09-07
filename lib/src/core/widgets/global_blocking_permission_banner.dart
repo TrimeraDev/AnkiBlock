@@ -64,14 +64,14 @@ class _SetupIssue {
     if (!blockingEnabled) {
       return const _SetupIssue(
         message:
-            'Blocking is turned off. Blocked apps open freely until you enable it in Settings.',
+            'Blocking is turned off. Blocked apps and sites open freely until you enable it in Settings.',
         fixRoute: '/settings',
       );
     }
     if (anki != null && !anki.isReady) {
       return _SetupIssue(
         message: !anki.installed
-            ? 'AnkiDroid is not installed. Connect it to study and unlock apps.'
+            ? 'AnkiDroid is not installed. Connect it to study and unlock apps and sites.'
             : 'AnkiDroid access not granted. Connect your collection to track cards.',
         fixRoute: '/ankidroid',
       );
@@ -82,16 +82,16 @@ class _SetupIssue {
     if (!status.accessibility) {
       return const _SetupIssue(
         message:
-            'Accessibility is turned off. App blocking will not work until you enable AnkiBlock in Accessibility settings.',
+            'Accessibility is turned off. App and website blocking will not work until you enable AnkiBlock in Accessibility settings.',
         fixRoute: '/permissions',
       );
     }
-    if (status.hasBlockedApps &&
+    if (status.hasAnythingToBlock &&
         status.blockingEnabled &&
         !status.monitorRunning) {
       return const _SetupIssue(
         message:
-            'App blocking is not active. Open Permissions and re-enable the '
+            'Blocking is not active. Open Permissions and re-enable the '
             'AnkiBlock Accessibility service after a reboot.',
         fixRoute: '/permissions',
       );

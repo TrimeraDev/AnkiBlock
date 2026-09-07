@@ -130,7 +130,7 @@ class _SettingsBody extends ConsumerWidget {
         ListTile(
           leading: const Icon(Icons.tune),
           title: const Text('Temporary unlock'),
-          subtitle: Text('$cards cards · all apps for $minutes min'),
+          subtitle: Text('$cards cards · apps & sites for $minutes min'),
           onTap: () async {
             final result = await showSteppedValuePickerDialog(
               context,
@@ -178,7 +178,7 @@ class _SettingsBody extends ConsumerWidget {
         SwitchListTile(
           secondary: const Icon(Icons.shield_outlined),
           title: const Text('Blocking enabled'),
-          subtitle: const Text('Off = blocked apps open freely'),
+          subtitle: const Text('Off = blocked apps and sites open freely'),
           value: enabled,
           onChanged: (v) async {
             if (!v) {
@@ -278,7 +278,7 @@ class _SettingsBody extends ConsumerWidget {
         ),
         ListTile(
           leading: const Icon(Icons.language),
-          title: const Text('Website & privacy'),
+          title: const Text('Privacy & project site'),
           onTap: () => openSupportLink(context, ref, (a) => a.openWebsite()),
         ),
         const Divider(),

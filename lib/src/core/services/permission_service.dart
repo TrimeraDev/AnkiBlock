@@ -9,6 +9,7 @@ class ProtectionStatus {
     required this.batteryUnrestricted,
     required this.monitorRunning,
     required this.hasBlockedApps,
+    required this.hasAnythingToBlock,
     required this.blockingEnabled,
     required this.protectionActive,
     this.oemManufacturer = 'unknown',
@@ -19,6 +20,8 @@ class ProtectionStatus {
   final bool batteryUnrestricted;
   final bool monitorRunning;
   final bool hasBlockedApps;
+  /// Blocked apps and/or website rules exist.
+  final bool hasAnythingToBlock;
   final bool blockingEnabled;
   final bool protectionActive;
   final String oemManufacturer;
@@ -28,7 +31,7 @@ class ProtectionStatus {
 
   bool get needsAttention =>
       !permissionsComplete ||
-      (hasBlockedApps && blockingEnabled && !protectionActive) ||
+      (hasAnythingToBlock && blockingEnabled && !protectionActive) ||
       !batteryUnrestricted;
 
   bool get needsOemAutostartHelp {
@@ -46,12 +49,18 @@ class ProtectionStatus {
 
   factory ProtectionStatus.fromMap(Map<dynamic, dynamic> map) {
     bool b(dynamic v) => v == true;
+    final hasApps = b(map['hasBlockedApps']);
+    // Older natives omit hasAnythingToBlock; fall back to apps-only.
+    final hasAnything = map.containsKey('hasAnythingToBlock')
+        ? b(map['hasAnythingToBlock'])
+        : hasApps;
     return ProtectionStatus(
       accessibility: b(map['accessibility']),
       usage: b(map['usage']),
       batteryUnrestricted: b(map['batteryUnrestricted']),
       monitorRunning: b(map['monitorRunning']),
-      hasBlockedApps: b(map['hasBlockedApps']),
+      hasBlockedApps: hasApps,
+      hasAnythingToBlock: hasAnything,
       blockingEnabled: b(map['blockingEnabled']),
       protectionActive: b(map['protectionActive']),
       oemManufacturer: map['oemManufacturer'] as String? ?? 'unknown',
@@ -130,6 +139,7 @@ class PermissionService {
         batteryUnrestricted: true,
         monitorRunning: true,
         hasBlockedApps: false,
+        hasAnythingToBlock: false,
         blockingEnabled: true,
         protectionActive: true,
       );
@@ -143,6 +153,7 @@ class PermissionService {
           batteryUnrestricted: false,
           monitorRunning: false,
           hasBlockedApps: false,
+          hasAnythingToBlock: false,
           blockingEnabled: true,
           protectionActive: false,
         );
@@ -155,6 +166,7 @@ class PermissionService {
         batteryUnrestricted: false,
         monitorRunning: false,
         hasBlockedApps: false,
+        hasAnythingToBlock: false,
         blockingEnabled: true,
         protectionActive: false,
       );

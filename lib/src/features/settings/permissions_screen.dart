@@ -92,7 +92,7 @@ class _PermissionsScreenState extends ConsumerState<PermissionsScreen>
           ? const Center(child: CircularProgressIndicator())
           : ListView(
               children: [
-                if (status.hasBlockedApps &&
+                if (status.hasAnythingToBlock &&
                     status.blockingEnabled &&
                     !status.accessibility)
                   const _StatusBanner(
@@ -100,9 +100,9 @@ class _PermissionsScreenState extends ConsumerState<PermissionsScreen>
                     color: AppTheme.warning,
                     message:
                         'Accessibility is off. Enable AnkiBlock under '
-                        'Settings → Accessibility so blocked apps stay gated.',
+                        'Settings → Accessibility so blocked apps and sites stay gated.',
                   ),
-                if (status.hasBlockedApps &&
+                if (status.hasAnythingToBlock &&
                     status.blockingEnabled &&
                     status.accessibility &&
                     !status.monitorRunning)
@@ -119,7 +119,7 @@ class _PermissionsScreenState extends ConsumerState<PermissionsScreen>
                   icon: Icons.accessibility_new_outlined,
                   title: 'Accessibility',
                   subtitle:
-                      'Required to detect blocked apps instantly and show the study gate.',
+                      'Required to detect blocked apps and websites instantly and show the study gate.',
                   granted: status.accessibility,
                   onRequest: () async {
                     final ok = await showAccessibilityDisclosureDialog(context);
@@ -153,8 +153,8 @@ class _PermissionsScreenState extends ConsumerState<PermissionsScreen>
                       '${_oemLabel(status.oemManufacturer)} autostart / battery',
                     ),
                     subtitle: const Text(
-                      'Open system settings so AnkiBlock can keep running in '
-                      'the background on this phone.',
+                      'Open system settings so Accessibility stays enabled '
+                      'after reboot on this phone.',
                     ),
                     trailing: ElevatedButton(
                       onPressed: () => svc.openOemAutostartSettings(),
@@ -209,7 +209,8 @@ class _PermissionsScreenState extends ConsumerState<PermissionsScreen>
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                     child: Text(
                       'Copy this report when filing a bug. It includes device '
-                      'info, permissions, blocking config, monitor health, and '
+                      'info, permissions, blocking config, Accessibility '
+                      'service health, and '
                       'recent errors — no card content or passwords.',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: AppTheme.onSurfaceVariant,

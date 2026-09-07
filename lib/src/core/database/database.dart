@@ -26,6 +26,17 @@ class BlockedApps extends Table {
   Set<Column> get primaryKey => {packageName};
 }
 
+@DataClassName('BlockedWebsite')
+class BlockedWebsites extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get pattern => text()();
+  BoolColumn get isRegex => boolean().withDefault(const Constant(false))();
+  TextColumn get label => text()();
+  BoolColumn get isBlocked => boolean().withDefault(const Constant(true))();
+  IntColumn get addedAt =>
+      integer().withDefault(Constant(DateTime.now().millisecondsSinceEpoch))();
+}
+
 @DataClassName('BlockRule')
 class BlockRules extends Table {
   IntColumn get id => integer()();
@@ -48,6 +59,9 @@ class BlockRules extends Table {
   IntColumn get settingsUnlockMinutes =>
       integer().withDefault(const Constant(10))();
   BoolColumn get isEnabled => boolean().withDefault(const Constant(true))();
+  /// When website rules exist, gate installed browsers we cannot inspect.
+  BoolColumn get blockUnsupportedBrowsers =>
+      boolean().withDefault(const Constant(false))();
   IntColumn get updatedAt =>
       integer().withDefault(Constant(DateTime.now().millisecondsSinceEpoch))();
 
@@ -87,6 +101,7 @@ class InstalledAppsCache extends Table {
 
 @DriftDatabase(tables: [
   BlockedApps,
+  BlockedWebsites,
   BlockRules,
   DailyStats,
   InstalledAppsCache,
@@ -100,7 +115,7 @@ class AppDatabase extends _$AppDatabase {
   }
 
   @override
-  int get schemaVersion => 11;
+  int get schemaVersion => 12;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -118,6 +133,14 @@ class AppDatabase extends _$AppDatabase {
           );
         },
         onUpgrade: (m, from, to) async {
+          if (from < 12) {
+            await m.createTable(blockedWebsites);
+            await m.database.customStatement(
+              'ALTER TABLE block_rules '
+              'ADD COLUMN block_unsupported_browsers INTEGER NOT NULL DEFAULT 0 '
+              'CHECK (block_unsupported_browsers IN (0, 1))',
+            );
+          }
           if (from < 11) {
             await m.database.customStatement(
               'ALTER TABLE block_rules '
@@ -241,6 +264,29 @@ class AppDatabase extends _$AppDatabase {
   Future deleteBlockedApp(String packageName) async {
     await (delete(blockedApps)..where((b) => b.packageName.equals(packageName)))
         .go();
+  }
+
+  // ============ BLOCKED WEBSITE QUERIES ============
+
+  Stream<List<BlockedWebsite>> watchAllBlockedWebsites() =>
+      select(blockedWebsites).watch();
+
+  Stream<List<BlockedWebsite>> watchActiveBlockedWebsites() =>
+      (select(blockedWebsites)..where((b) => b.isBlocked.equals(true))).watch();
+
+  Future<BlockedWebsite?> getBlockedWebsite(int id) =>
+      (select(blockedWebsites)..where((b) => b.id.equals(id))).getSingleOrNull();
+
+  Future<int> insertBlockedWebsite(BlockedWebsitesCompanion site) =>
+      into(blockedWebsites).insert(site);
+
+  Future setWebsiteBlocked(int id, bool blocked) async {
+    await (update(blockedWebsites)..where((b) => b.id.equals(id)))
+        .write(BlockedWebsitesCompanion(isBlocked: Value(blocked)));
+  }
+
+  Future deleteBlockedWebsite(int id) async {
+    await (delete(blockedWebsites)..where((b) => b.id.equals(id))).go();
   }
 
   // ============ INSTALLED APPS CACHE ============

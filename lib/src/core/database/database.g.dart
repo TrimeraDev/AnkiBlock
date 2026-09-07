@@ -283,6 +283,343 @@ class BlockedAppsCompanion extends UpdateCompanion<BlockedApp> {
   }
 }
 
+class $BlockedWebsitesTable extends BlockedWebsites
+    with TableInfo<$BlockedWebsitesTable, BlockedWebsite> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $BlockedWebsitesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+      'id', aliasedName, false,
+      hasAutoIncrement: true,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('PRIMARY KEY AUTOINCREMENT'));
+  static const VerificationMeta _patternMeta =
+      const VerificationMeta('pattern');
+  @override
+  late final GeneratedColumn<String> pattern = GeneratedColumn<String>(
+      'pattern', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _isRegexMeta =
+      const VerificationMeta('isRegex');
+  @override
+  late final GeneratedColumn<bool> isRegex = GeneratedColumn<bool>(
+      'is_regex', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('CHECK ("is_regex" IN (0, 1))'),
+      defaultValue: const Constant(false));
+  static const VerificationMeta _labelMeta = const VerificationMeta('label');
+  @override
+  late final GeneratedColumn<String> label = GeneratedColumn<String>(
+      'label', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _isBlockedMeta =
+      const VerificationMeta('isBlocked');
+  @override
+  late final GeneratedColumn<bool> isBlocked = GeneratedColumn<bool>(
+      'is_blocked', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('CHECK ("is_blocked" IN (0, 1))'),
+      defaultValue: const Constant(true));
+  static const VerificationMeta _addedAtMeta =
+      const VerificationMeta('addedAt');
+  @override
+  late final GeneratedColumn<int> addedAt = GeneratedColumn<int>(
+      'added_at', aliasedName, false,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultValue: Constant(DateTime.now().millisecondsSinceEpoch));
+  @override
+  List<GeneratedColumn> get $columns =>
+      [id, pattern, isRegex, label, isBlocked, addedAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'blocked_websites';
+  @override
+  VerificationContext validateIntegrity(Insertable<BlockedWebsite> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('pattern')) {
+      context.handle(_patternMeta,
+          pattern.isAcceptableOrUnknown(data['pattern']!, _patternMeta));
+    } else if (isInserting) {
+      context.missing(_patternMeta);
+    }
+    if (data.containsKey('is_regex')) {
+      context.handle(_isRegexMeta,
+          isRegex.isAcceptableOrUnknown(data['is_regex']!, _isRegexMeta));
+    }
+    if (data.containsKey('label')) {
+      context.handle(
+          _labelMeta, label.isAcceptableOrUnknown(data['label']!, _labelMeta));
+    } else if (isInserting) {
+      context.missing(_labelMeta);
+    }
+    if (data.containsKey('is_blocked')) {
+      context.handle(_isBlockedMeta,
+          isBlocked.isAcceptableOrUnknown(data['is_blocked']!, _isBlockedMeta));
+    }
+    if (data.containsKey('added_at')) {
+      context.handle(_addedAtMeta,
+          addedAt.isAcceptableOrUnknown(data['added_at']!, _addedAtMeta));
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  BlockedWebsite map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return BlockedWebsite(
+      id: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}id'])!,
+      pattern: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}pattern'])!,
+      isRegex: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}is_regex'])!,
+      label: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}label'])!,
+      isBlocked: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}is_blocked'])!,
+      addedAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}added_at'])!,
+    );
+  }
+
+  @override
+  $BlockedWebsitesTable createAlias(String alias) {
+    return $BlockedWebsitesTable(attachedDatabase, alias);
+  }
+}
+
+class BlockedWebsite extends DataClass implements Insertable<BlockedWebsite> {
+  final int id;
+  final String pattern;
+  final bool isRegex;
+  final String label;
+  final bool isBlocked;
+  final int addedAt;
+  const BlockedWebsite(
+      {required this.id,
+      required this.pattern,
+      required this.isRegex,
+      required this.label,
+      required this.isBlocked,
+      required this.addedAt});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['pattern'] = Variable<String>(pattern);
+    map['is_regex'] = Variable<bool>(isRegex);
+    map['label'] = Variable<String>(label);
+    map['is_blocked'] = Variable<bool>(isBlocked);
+    map['added_at'] = Variable<int>(addedAt);
+    return map;
+  }
+
+  BlockedWebsitesCompanion toCompanion(bool nullToAbsent) {
+    return BlockedWebsitesCompanion(
+      id: Value(id),
+      pattern: Value(pattern),
+      isRegex: Value(isRegex),
+      label: Value(label),
+      isBlocked: Value(isBlocked),
+      addedAt: Value(addedAt),
+    );
+  }
+
+  factory BlockedWebsite.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return BlockedWebsite(
+      id: serializer.fromJson<int>(json['id']),
+      pattern: serializer.fromJson<String>(json['pattern']),
+      isRegex: serializer.fromJson<bool>(json['isRegex']),
+      label: serializer.fromJson<String>(json['label']),
+      isBlocked: serializer.fromJson<bool>(json['isBlocked']),
+      addedAt: serializer.fromJson<int>(json['addedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'pattern': serializer.toJson<String>(pattern),
+      'isRegex': serializer.toJson<bool>(isRegex),
+      'label': serializer.toJson<String>(label),
+      'isBlocked': serializer.toJson<bool>(isBlocked),
+      'addedAt': serializer.toJson<int>(addedAt),
+    };
+  }
+
+  BlockedWebsite copyWith(
+          {int? id,
+          String? pattern,
+          bool? isRegex,
+          String? label,
+          bool? isBlocked,
+          int? addedAt}) =>
+      BlockedWebsite(
+        id: id ?? this.id,
+        pattern: pattern ?? this.pattern,
+        isRegex: isRegex ?? this.isRegex,
+        label: label ?? this.label,
+        isBlocked: isBlocked ?? this.isBlocked,
+        addedAt: addedAt ?? this.addedAt,
+      );
+  BlockedWebsite copyWithCompanion(BlockedWebsitesCompanion data) {
+    return BlockedWebsite(
+      id: data.id.present ? data.id.value : this.id,
+      pattern: data.pattern.present ? data.pattern.value : this.pattern,
+      isRegex: data.isRegex.present ? data.isRegex.value : this.isRegex,
+      label: data.label.present ? data.label.value : this.label,
+      isBlocked: data.isBlocked.present ? data.isBlocked.value : this.isBlocked,
+      addedAt: data.addedAt.present ? data.addedAt.value : this.addedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('BlockedWebsite(')
+          ..write('id: $id, ')
+          ..write('pattern: $pattern, ')
+          ..write('isRegex: $isRegex, ')
+          ..write('label: $label, ')
+          ..write('isBlocked: $isBlocked, ')
+          ..write('addedAt: $addedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(id, pattern, isRegex, label, isBlocked, addedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is BlockedWebsite &&
+          other.id == this.id &&
+          other.pattern == this.pattern &&
+          other.isRegex == this.isRegex &&
+          other.label == this.label &&
+          other.isBlocked == this.isBlocked &&
+          other.addedAt == this.addedAt);
+}
+
+class BlockedWebsitesCompanion extends UpdateCompanion<BlockedWebsite> {
+  final Value<int> id;
+  final Value<String> pattern;
+  final Value<bool> isRegex;
+  final Value<String> label;
+  final Value<bool> isBlocked;
+  final Value<int> addedAt;
+  const BlockedWebsitesCompanion({
+    this.id = const Value.absent(),
+    this.pattern = const Value.absent(),
+    this.isRegex = const Value.absent(),
+    this.label = const Value.absent(),
+    this.isBlocked = const Value.absent(),
+    this.addedAt = const Value.absent(),
+  });
+  BlockedWebsitesCompanion.insert({
+    this.id = const Value.absent(),
+    required String pattern,
+    this.isRegex = const Value.absent(),
+    required String label,
+    this.isBlocked = const Value.absent(),
+    this.addedAt = const Value.absent(),
+  })  : pattern = Value(pattern),
+        label = Value(label);
+  static Insertable<BlockedWebsite> custom({
+    Expression<int>? id,
+    Expression<String>? pattern,
+    Expression<bool>? isRegex,
+    Expression<String>? label,
+    Expression<bool>? isBlocked,
+    Expression<int>? addedAt,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (pattern != null) 'pattern': pattern,
+      if (isRegex != null) 'is_regex': isRegex,
+      if (label != null) 'label': label,
+      if (isBlocked != null) 'is_blocked': isBlocked,
+      if (addedAt != null) 'added_at': addedAt,
+    });
+  }
+
+  BlockedWebsitesCompanion copyWith(
+      {Value<int>? id,
+      Value<String>? pattern,
+      Value<bool>? isRegex,
+      Value<String>? label,
+      Value<bool>? isBlocked,
+      Value<int>? addedAt}) {
+    return BlockedWebsitesCompanion(
+      id: id ?? this.id,
+      pattern: pattern ?? this.pattern,
+      isRegex: isRegex ?? this.isRegex,
+      label: label ?? this.label,
+      isBlocked: isBlocked ?? this.isBlocked,
+      addedAt: addedAt ?? this.addedAt,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (pattern.present) {
+      map['pattern'] = Variable<String>(pattern.value);
+    }
+    if (isRegex.present) {
+      map['is_regex'] = Variable<bool>(isRegex.value);
+    }
+    if (label.present) {
+      map['label'] = Variable<String>(label.value);
+    }
+    if (isBlocked.present) {
+      map['is_blocked'] = Variable<bool>(isBlocked.value);
+    }
+    if (addedAt.present) {
+      map['added_at'] = Variable<int>(addedAt.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('BlockedWebsitesCompanion(')
+          ..write('id: $id, ')
+          ..write('pattern: $pattern, ')
+          ..write('isRegex: $isRegex, ')
+          ..write('label: $label, ')
+          ..write('isBlocked: $isBlocked, ')
+          ..write('addedAt: $addedAt')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $BlockRulesTable extends BlockRules
     with TableInfo<$BlockRulesTable, BlockRule> {
   @override
@@ -388,6 +725,17 @@ class $BlockRulesTable extends BlockRules
       defaultConstraints:
           GeneratedColumn.constraintIsAlways('CHECK ("is_enabled" IN (0, 1))'),
       defaultValue: const Constant(true));
+  static const VerificationMeta _blockUnsupportedBrowsersMeta =
+      const VerificationMeta('blockUnsupportedBrowsers');
+  @override
+  late final GeneratedColumn<bool> blockUnsupportedBrowsers =
+      GeneratedColumn<bool>(
+          'block_unsupported_browsers', aliasedName, false,
+          type: DriftSqlType.bool,
+          requiredDuringInsert: false,
+          defaultConstraints: GeneratedColumn.constraintIsAlways(
+              'CHECK ("block_unsupported_browsers" IN (0, 1))'),
+          defaultValue: const Constant(false));
   static const VerificationMeta _updatedAtMeta =
       const VerificationMeta('updatedAt');
   @override
@@ -410,6 +758,7 @@ class $BlockRulesTable extends BlockRules
         settingsPasswordEnabled,
         settingsUnlockMinutes,
         isEnabled,
+        blockUnsupportedBrowsers,
         updatedAt
       ];
   @override
@@ -488,6 +837,13 @@ class $BlockRulesTable extends BlockRules
       context.handle(_isEnabledMeta,
           isEnabled.isAcceptableOrUnknown(data['is_enabled']!, _isEnabledMeta));
     }
+    if (data.containsKey('block_unsupported_browsers')) {
+      context.handle(
+          _blockUnsupportedBrowsersMeta,
+          blockUnsupportedBrowsers.isAcceptableOrUnknown(
+              data['block_unsupported_browsers']!,
+              _blockUnsupportedBrowsersMeta));
+    }
     if (data.containsKey('updated_at')) {
       context.handle(_updatedAtMeta,
           updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta));
@@ -526,6 +882,9 @@ class $BlockRulesTable extends BlockRules
           DriftSqlType.int, data['${effectivePrefix}settings_unlock_minutes'])!,
       isEnabled: attachedDatabase.typeMapping
           .read(DriftSqlType.bool, data['${effectivePrefix}is_enabled'])!,
+      blockUnsupportedBrowsers: attachedDatabase.typeMapping.read(
+          DriftSqlType.bool,
+          data['${effectivePrefix}block_unsupported_browsers'])!,
       updatedAt: attachedDatabase.typeMapping
           .read(DriftSqlType.int, data['${effectivePrefix}updated_at'])!,
     );
@@ -556,6 +915,9 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
   final bool settingsPasswordEnabled;
   final int settingsUnlockMinutes;
   final bool isEnabled;
+
+  /// When website rules exist, gate installed browsers we cannot inspect.
+  final bool blockUnsupportedBrowsers;
   final int updatedAt;
   const BlockRule(
       {required this.id,
@@ -570,6 +932,7 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
       required this.settingsPasswordEnabled,
       required this.settingsUnlockMinutes,
       required this.isEnabled,
+      required this.blockUnsupportedBrowsers,
       required this.updatedAt});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -586,6 +949,8 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
     map['settings_password_enabled'] = Variable<bool>(settingsPasswordEnabled);
     map['settings_unlock_minutes'] = Variable<int>(settingsUnlockMinutes);
     map['is_enabled'] = Variable<bool>(isEnabled);
+    map['block_unsupported_browsers'] =
+        Variable<bool>(blockUnsupportedBrowsers);
     map['updated_at'] = Variable<int>(updatedAt);
     return map;
   }
@@ -604,6 +969,7 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
       settingsPasswordEnabled: Value(settingsPasswordEnabled),
       settingsUnlockMinutes: Value(settingsUnlockMinutes),
       isEnabled: Value(isEnabled),
+      blockUnsupportedBrowsers: Value(blockUnsupportedBrowsers),
       updatedAt: Value(updatedAt),
     );
   }
@@ -628,6 +994,8 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
       settingsUnlockMinutes:
           serializer.fromJson<int>(json['settingsUnlockMinutes']),
       isEnabled: serializer.fromJson<bool>(json['isEnabled']),
+      blockUnsupportedBrowsers:
+          serializer.fromJson<bool>(json['blockUnsupportedBrowsers']),
       updatedAt: serializer.fromJson<int>(json['updatedAt']),
     );
   }
@@ -648,6 +1016,8 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
           serializer.toJson<bool>(settingsPasswordEnabled),
       'settingsUnlockMinutes': serializer.toJson<int>(settingsUnlockMinutes),
       'isEnabled': serializer.toJson<bool>(isEnabled),
+      'blockUnsupportedBrowsers':
+          serializer.toJson<bool>(blockUnsupportedBrowsers),
       'updatedAt': serializer.toJson<int>(updatedAt),
     };
   }
@@ -665,6 +1035,7 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
           bool? settingsPasswordEnabled,
           int? settingsUnlockMinutes,
           bool? isEnabled,
+          bool? blockUnsupportedBrowsers,
           int? updatedAt}) =>
       BlockRule(
         id: id ?? this.id,
@@ -682,6 +1053,8 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
         settingsUnlockMinutes:
             settingsUnlockMinutes ?? this.settingsUnlockMinutes,
         isEnabled: isEnabled ?? this.isEnabled,
+        blockUnsupportedBrowsers:
+            blockUnsupportedBrowsers ?? this.blockUnsupportedBrowsers,
         updatedAt: updatedAt ?? this.updatedAt,
       );
   BlockRule copyWithCompanion(BlockRulesCompanion data) {
@@ -716,6 +1089,9 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
           ? data.settingsUnlockMinutes.value
           : this.settingsUnlockMinutes,
       isEnabled: data.isEnabled.present ? data.isEnabled.value : this.isEnabled,
+      blockUnsupportedBrowsers: data.blockUnsupportedBrowsers.present
+          ? data.blockUnsupportedBrowsers.value
+          : this.blockUnsupportedBrowsers,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
   }
@@ -735,6 +1111,7 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
           ..write('settingsPasswordEnabled: $settingsPasswordEnabled, ')
           ..write('settingsUnlockMinutes: $settingsUnlockMinutes, ')
           ..write('isEnabled: $isEnabled, ')
+          ..write('blockUnsupportedBrowsers: $blockUnsupportedBrowsers, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
@@ -754,6 +1131,7 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
       settingsPasswordEnabled,
       settingsUnlockMinutes,
       isEnabled,
+      blockUnsupportedBrowsers,
       updatedAt);
   @override
   bool operator ==(Object other) =>
@@ -771,6 +1149,7 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
           other.settingsPasswordEnabled == this.settingsPasswordEnabled &&
           other.settingsUnlockMinutes == this.settingsUnlockMinutes &&
           other.isEnabled == this.isEnabled &&
+          other.blockUnsupportedBrowsers == this.blockUnsupportedBrowsers &&
           other.updatedAt == this.updatedAt);
 }
 
@@ -787,6 +1166,7 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
   final Value<bool> settingsPasswordEnabled;
   final Value<int> settingsUnlockMinutes;
   final Value<bool> isEnabled;
+  final Value<bool> blockUnsupportedBrowsers;
   final Value<int> updatedAt;
   const BlockRulesCompanion({
     this.id = const Value.absent(),
@@ -801,6 +1181,7 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
     this.settingsPasswordEnabled = const Value.absent(),
     this.settingsUnlockMinutes = const Value.absent(),
     this.isEnabled = const Value.absent(),
+    this.blockUnsupportedBrowsers = const Value.absent(),
     this.updatedAt = const Value.absent(),
   });
   BlockRulesCompanion.insert({
@@ -816,6 +1197,7 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
     this.settingsPasswordEnabled = const Value.absent(),
     this.settingsUnlockMinutes = const Value.absent(),
     this.isEnabled = const Value.absent(),
+    this.blockUnsupportedBrowsers = const Value.absent(),
     this.updatedAt = const Value.absent(),
   });
   static Insertable<BlockRule> custom({
@@ -831,6 +1213,7 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
     Expression<bool>? settingsPasswordEnabled,
     Expression<int>? settingsUnlockMinutes,
     Expression<bool>? isEnabled,
+    Expression<bool>? blockUnsupportedBrowsers,
     Expression<int>? updatedAt,
   }) {
     return RawValuesInsertable({
@@ -849,6 +1232,8 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
       if (settingsUnlockMinutes != null)
         'settings_unlock_minutes': settingsUnlockMinutes,
       if (isEnabled != null) 'is_enabled': isEnabled,
+      if (blockUnsupportedBrowsers != null)
+        'block_unsupported_browsers': blockUnsupportedBrowsers,
       if (updatedAt != null) 'updated_at': updatedAt,
     });
   }
@@ -866,6 +1251,7 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
       Value<bool>? settingsPasswordEnabled,
       Value<int>? settingsUnlockMinutes,
       Value<bool>? isEnabled,
+      Value<bool>? blockUnsupportedBrowsers,
       Value<int>? updatedAt}) {
     return BlockRulesCompanion(
       id: id ?? this.id,
@@ -883,6 +1269,8 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
       settingsUnlockMinutes:
           settingsUnlockMinutes ?? this.settingsUnlockMinutes,
       isEnabled: isEnabled ?? this.isEnabled,
+      blockUnsupportedBrowsers:
+          blockUnsupportedBrowsers ?? this.blockUnsupportedBrowsers,
       updatedAt: updatedAt ?? this.updatedAt,
     );
   }
@@ -929,6 +1317,10 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
     if (isEnabled.present) {
       map['is_enabled'] = Variable<bool>(isEnabled.value);
     }
+    if (blockUnsupportedBrowsers.present) {
+      map['block_unsupported_browsers'] =
+          Variable<bool>(blockUnsupportedBrowsers.value);
+    }
     if (updatedAt.present) {
       map['updated_at'] = Variable<int>(updatedAt.value);
     }
@@ -950,6 +1342,7 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
           ..write('settingsPasswordEnabled: $settingsPasswordEnabled, ')
           ..write('settingsUnlockMinutes: $settingsUnlockMinutes, ')
           ..write('isEnabled: $isEnabled, ')
+          ..write('blockUnsupportedBrowsers: $blockUnsupportedBrowsers, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
@@ -1636,6 +2029,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
   late final $BlockedAppsTable blockedApps = $BlockedAppsTable(this);
+  late final $BlockedWebsitesTable blockedWebsites =
+      $BlockedWebsitesTable(this);
   late final $BlockRulesTable blockRules = $BlockRulesTable(this);
   late final $DailyStatsTable dailyStats = $DailyStatsTable(this);
   late final $InstalledAppsCacheTable installedAppsCache =
@@ -1644,8 +2039,13 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
-  List<DatabaseSchemaEntity> get allSchemaEntities =>
-      [blockedApps, blockRules, dailyStats, installedAppsCache];
+  List<DatabaseSchemaEntity> get allSchemaEntities => [
+        blockedApps,
+        blockedWebsites,
+        blockRules,
+        dailyStats,
+        installedAppsCache
+      ];
 }
 
 typedef $$BlockedAppsTableCreateCompanionBuilder = BlockedAppsCompanion
@@ -1800,6 +2200,189 @@ typedef $$BlockedAppsTableProcessedTableManager = ProcessedTableManager<
     (BlockedApp, BaseReferences<_$AppDatabase, $BlockedAppsTable, BlockedApp>),
     BlockedApp,
     PrefetchHooks Function()>;
+typedef $$BlockedWebsitesTableCreateCompanionBuilder = BlockedWebsitesCompanion
+    Function({
+  Value<int> id,
+  required String pattern,
+  Value<bool> isRegex,
+  required String label,
+  Value<bool> isBlocked,
+  Value<int> addedAt,
+});
+typedef $$BlockedWebsitesTableUpdateCompanionBuilder = BlockedWebsitesCompanion
+    Function({
+  Value<int> id,
+  Value<String> pattern,
+  Value<bool> isRegex,
+  Value<String> label,
+  Value<bool> isBlocked,
+  Value<int> addedAt,
+});
+
+class $$BlockedWebsitesTableFilterComposer
+    extends Composer<_$AppDatabase, $BlockedWebsitesTable> {
+  $$BlockedWebsitesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get pattern => $composableBuilder(
+      column: $table.pattern, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<bool> get isRegex => $composableBuilder(
+      column: $table.isRegex, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get label => $composableBuilder(
+      column: $table.label, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<bool> get isBlocked => $composableBuilder(
+      column: $table.isBlocked, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get addedAt => $composableBuilder(
+      column: $table.addedAt, builder: (column) => ColumnFilters(column));
+}
+
+class $$BlockedWebsitesTableOrderingComposer
+    extends Composer<_$AppDatabase, $BlockedWebsitesTable> {
+  $$BlockedWebsitesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get pattern => $composableBuilder(
+      column: $table.pattern, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<bool> get isRegex => $composableBuilder(
+      column: $table.isRegex, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get label => $composableBuilder(
+      column: $table.label, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<bool> get isBlocked => $composableBuilder(
+      column: $table.isBlocked, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get addedAt => $composableBuilder(
+      column: $table.addedAt, builder: (column) => ColumnOrderings(column));
+}
+
+class $$BlockedWebsitesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $BlockedWebsitesTable> {
+  $$BlockedWebsitesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get pattern =>
+      $composableBuilder(column: $table.pattern, builder: (column) => column);
+
+  GeneratedColumn<bool> get isRegex =>
+      $composableBuilder(column: $table.isRegex, builder: (column) => column);
+
+  GeneratedColumn<String> get label =>
+      $composableBuilder(column: $table.label, builder: (column) => column);
+
+  GeneratedColumn<bool> get isBlocked =>
+      $composableBuilder(column: $table.isBlocked, builder: (column) => column);
+
+  GeneratedColumn<int> get addedAt =>
+      $composableBuilder(column: $table.addedAt, builder: (column) => column);
+}
+
+class $$BlockedWebsitesTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $BlockedWebsitesTable,
+    BlockedWebsite,
+    $$BlockedWebsitesTableFilterComposer,
+    $$BlockedWebsitesTableOrderingComposer,
+    $$BlockedWebsitesTableAnnotationComposer,
+    $$BlockedWebsitesTableCreateCompanionBuilder,
+    $$BlockedWebsitesTableUpdateCompanionBuilder,
+    (
+      BlockedWebsite,
+      BaseReferences<_$AppDatabase, $BlockedWebsitesTable, BlockedWebsite>
+    ),
+    BlockedWebsite,
+    PrefetchHooks Function()> {
+  $$BlockedWebsitesTableTableManager(
+      _$AppDatabase db, $BlockedWebsitesTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$BlockedWebsitesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$BlockedWebsitesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$BlockedWebsitesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<int> id = const Value.absent(),
+            Value<String> pattern = const Value.absent(),
+            Value<bool> isRegex = const Value.absent(),
+            Value<String> label = const Value.absent(),
+            Value<bool> isBlocked = const Value.absent(),
+            Value<int> addedAt = const Value.absent(),
+          }) =>
+              BlockedWebsitesCompanion(
+            id: id,
+            pattern: pattern,
+            isRegex: isRegex,
+            label: label,
+            isBlocked: isBlocked,
+            addedAt: addedAt,
+          ),
+          createCompanionCallback: ({
+            Value<int> id = const Value.absent(),
+            required String pattern,
+            Value<bool> isRegex = const Value.absent(),
+            required String label,
+            Value<bool> isBlocked = const Value.absent(),
+            Value<int> addedAt = const Value.absent(),
+          }) =>
+              BlockedWebsitesCompanion.insert(
+            id: id,
+            pattern: pattern,
+            isRegex: isRegex,
+            label: label,
+            isBlocked: isBlocked,
+            addedAt: addedAt,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ));
+}
+
+typedef $$BlockedWebsitesTableProcessedTableManager = ProcessedTableManager<
+    _$AppDatabase,
+    $BlockedWebsitesTable,
+    BlockedWebsite,
+    $$BlockedWebsitesTableFilterComposer,
+    $$BlockedWebsitesTableOrderingComposer,
+    $$BlockedWebsitesTableAnnotationComposer,
+    $$BlockedWebsitesTableCreateCompanionBuilder,
+    $$BlockedWebsitesTableUpdateCompanionBuilder,
+    (
+      BlockedWebsite,
+      BaseReferences<_$AppDatabase, $BlockedWebsitesTable, BlockedWebsite>
+    ),
+    BlockedWebsite,
+    PrefetchHooks Function()>;
 typedef $$BlockRulesTableCreateCompanionBuilder = BlockRulesCompanion Function({
   Value<int> id,
   Value<int> cardsRequired,
@@ -1813,6 +2396,7 @@ typedef $$BlockRulesTableCreateCompanionBuilder = BlockRulesCompanion Function({
   Value<bool> settingsPasswordEnabled,
   Value<int> settingsUnlockMinutes,
   Value<bool> isEnabled,
+  Value<bool> blockUnsupportedBrowsers,
   Value<int> updatedAt,
 });
 typedef $$BlockRulesTableUpdateCompanionBuilder = BlockRulesCompanion Function({
@@ -1828,6 +2412,7 @@ typedef $$BlockRulesTableUpdateCompanionBuilder = BlockRulesCompanion Function({
   Value<bool> settingsPasswordEnabled,
   Value<int> settingsUnlockMinutes,
   Value<bool> isEnabled,
+  Value<bool> blockUnsupportedBrowsers,
   Value<int> updatedAt,
 });
 
@@ -1881,6 +2466,10 @@ class $$BlockRulesTableFilterComposer
 
   ColumnFilters<bool> get isEnabled => $composableBuilder(
       column: $table.isEnabled, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<bool> get blockUnsupportedBrowsers => $composableBuilder(
+      column: $table.blockUnsupportedBrowsers,
+      builder: (column) => ColumnFilters(column));
 
   ColumnFilters<int> get updatedAt => $composableBuilder(
       column: $table.updatedAt, builder: (column) => ColumnFilters(column));
@@ -1940,6 +2529,10 @@ class $$BlockRulesTableOrderingComposer
   ColumnOrderings<bool> get isEnabled => $composableBuilder(
       column: $table.isEnabled, builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<bool> get blockUnsupportedBrowsers => $composableBuilder(
+      column: $table.blockUnsupportedBrowsers,
+      builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<int> get updatedAt => $composableBuilder(
       column: $table.updatedAt, builder: (column) => ColumnOrderings(column));
 }
@@ -1989,6 +2582,9 @@ class $$BlockRulesTableAnnotationComposer
   GeneratedColumn<bool> get isEnabled =>
       $composableBuilder(column: $table.isEnabled, builder: (column) => column);
 
+  GeneratedColumn<bool> get blockUnsupportedBrowsers => $composableBuilder(
+      column: $table.blockUnsupportedBrowsers, builder: (column) => column);
+
   GeneratedColumn<int> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
 }
@@ -2028,6 +2624,7 @@ class $$BlockRulesTableTableManager extends RootTableManager<
             Value<bool> settingsPasswordEnabled = const Value.absent(),
             Value<int> settingsUnlockMinutes = const Value.absent(),
             Value<bool> isEnabled = const Value.absent(),
+            Value<bool> blockUnsupportedBrowsers = const Value.absent(),
             Value<int> updatedAt = const Value.absent(),
           }) =>
               BlockRulesCompanion(
@@ -2043,6 +2640,7 @@ class $$BlockRulesTableTableManager extends RootTableManager<
             settingsPasswordEnabled: settingsPasswordEnabled,
             settingsUnlockMinutes: settingsUnlockMinutes,
             isEnabled: isEnabled,
+            blockUnsupportedBrowsers: blockUnsupportedBrowsers,
             updatedAt: updatedAt,
           ),
           createCompanionCallback: ({
@@ -2058,6 +2656,7 @@ class $$BlockRulesTableTableManager extends RootTableManager<
             Value<bool> settingsPasswordEnabled = const Value.absent(),
             Value<int> settingsUnlockMinutes = const Value.absent(),
             Value<bool> isEnabled = const Value.absent(),
+            Value<bool> blockUnsupportedBrowsers = const Value.absent(),
             Value<int> updatedAt = const Value.absent(),
           }) =>
               BlockRulesCompanion.insert(
@@ -2073,6 +2672,7 @@ class $$BlockRulesTableTableManager extends RootTableManager<
             settingsPasswordEnabled: settingsPasswordEnabled,
             settingsUnlockMinutes: settingsUnlockMinutes,
             isEnabled: isEnabled,
+            blockUnsupportedBrowsers: blockUnsupportedBrowsers,
             updatedAt: updatedAt,
           ),
           withReferenceMapper: (p0) => p0
@@ -2462,6 +3062,8 @@ class $AppDatabaseManager {
   $AppDatabaseManager(this._db);
   $$BlockedAppsTableTableManager get blockedApps =>
       $$BlockedAppsTableTableManager(_db, _db.blockedApps);
+  $$BlockedWebsitesTableTableManager get blockedWebsites =>
+      $$BlockedWebsitesTableTableManager(_db, _db.blockedWebsites);
   $$BlockRulesTableTableManager get blockRules =>
       $$BlockRulesTableTableManager(_db, _db.blockRules);
   $$DailyStatsTableTableManager get dailyStats =>

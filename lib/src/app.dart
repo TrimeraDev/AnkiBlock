@@ -159,6 +159,7 @@ class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
         .map((b) => (pkg: b.packageName, name: b.displayName))
         .toList();
     await svc.setBlockedPackages(active);
+    await syncBlockedWebsitesToNative(ref);
     await syncStudyScopeToNative(ref);
     await syncBlockRuleToNative(ref);
     await _mergeFromNative();

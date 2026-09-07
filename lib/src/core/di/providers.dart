@@ -24,7 +24,7 @@ final permissionServiceProvider = Provider<PermissionService>((ref) {
   return PermissionService();
 });
 
-/// Accessibility + optional usage/overlay state (Android). Powers the global
+/// Accessibility + optional usage state (Android). Powers the global
 /// protection banner and permissions screen.
 final protectionStatusProvider =
     FutureProvider<ProtectionStatus>((ref) async {
@@ -157,6 +157,17 @@ final blockedAppsProvider = StreamProvider<List<BlockedApp>>((ref) {
 final activeBlockedAppsProvider = StreamProvider<List<BlockedApp>>((ref) {
   final db = ref.watch(databaseProvider);
   return db.watchActiveBlockedApps();
+});
+
+final blockedWebsitesProvider = StreamProvider<List<BlockedWebsite>>((ref) {
+  final db = ref.watch(databaseProvider);
+  return db.watchAllBlockedWebsites();
+});
+
+final activeBlockedWebsitesProvider =
+    StreamProvider<List<BlockedWebsite>>((ref) {
+  final db = ref.watch(databaseProvider);
+  return db.watchActiveBlockedWebsites();
 });
 
 final blockRuleProvider = StreamProvider<BlockRule?>((ref) {

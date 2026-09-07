@@ -150,7 +150,8 @@ String formatDiagnosticsReport(DiagnosticsInputs input) {
     'Battery unrestricted: ${yesNo(d['batteryUnrestricted'] == true || input.protection.batteryUnrestricted)}',
     'Protection active: ${yesNo(d['protectionActive'] == true || input.protection.protectionActive)}',
     if (!input.protection.protectionActive)
-      '  (blocked=${input.protection.hasBlockedApps}, '
+      '  (anythingToBlock=${input.protection.hasAnythingToBlock}, '
+          'apps=${input.protection.hasBlockedApps}, '
           'enabled=${input.protection.blockingEnabled}, '
           'a11y=${input.protection.accessibility}, '
           'engine=${input.protection.monitorRunning})',
@@ -171,6 +172,11 @@ String formatDiagnosticsReport(DiagnosticsInputs input) {
     '--- Blocking config (native sync) ---',
     'Native enabled: ${yesNo(d['blockingEnabled'] == true)}',
     'Native blocked count: ${d['blockedAppCount'] ?? '?'}',
+    'Website rules: ${d['websiteRuleCount'] ?? 0}',
+    'Block unsupported browsers: ${yesNo(d['blockUnsupportedBrowsers'] == true)}',
+    'Supported browsers installed: ${d['supportedBrowsersInstalled'] ?? '?'}',
+    'Last URL host: ${(d['lastUrlHost'] as String?)?.isNotEmpty == true ? d['lastUrlHost'] : '—'}',
+    'Last URL check: ${agoMs(d['lastUrlCheckMs'])}',
     'Unlock window: ${((d['unlockRemainingMs'] as num?)?.toInt() ?? 0) > 0 ? '${agoDuration(d['unlockRemainingMs'])} left' : 'locked'}',
     'Study mode: ${d['studyMode'] ?? '?'}',
     'Unlock goal: ${d['unlockGoalCards'] ?? '?'} cards',
@@ -193,15 +199,15 @@ String formatDiagnosticsReport(DiagnosticsInputs input) {
       'Due in scope: L=${input.counts.learnCount} '
           'R=${input.counts.reviewCount} N=${input.counts.newCount}',
     '',
-    '--- Accessibility monitor ---',
+    '--- Accessibility service ---',
     'Should run: ${yesNo(d['shouldStartMonitor'] == true)}',
     'Enabled in Settings: ${yesNo(d['accessibilityEnabled'] == true)}',
     'Service connected: ${yesNo(d['engineConnected'] == true)}',
-    'Monitor healthy: ${yesNo(d['monitorRunning'] == true)}',
+    'Service healthy: ${yesNo(d['monitorRunning'] == true)}',
     'Last event: ${agoDuration(d['lastEventAgeMs'])} ago',
     'Service (re)connects: ${d['monitorRestarts'] ?? 0}',
     '',
-    '--- Study gate (native overlay) ---',
+    '--- Study gate (accessibility overlay) ---',
     'Showing now: ${yesNo(d['gateShowing'] == true)}',
     'Last shown: ${agoMs(d['lastGateShownMs'])}',
     'Total shown: ${d['gateShownCount'] ?? 0}',

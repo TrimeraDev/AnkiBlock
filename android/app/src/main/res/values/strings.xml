@@ -2,8 +2,10 @@
 <resources>
     <string name="app_name">AnkiBlock</string>
     <string name="accessibility_service_description">
-        AnkiBlock uses Accessibility to detect when you open a blocked app so it can
-        show your flashcard study gate. It does not read screen content, passwords,
-        or personal messages, and never sends this data off your device.
+        AnkiBlock uses Accessibility to detect when you open a blocked app or a
+        blocked website in a supported browser so it can show your flashcard
+        study gate. In browsers it reads only the address-bar URL you configured
+        rules for. It does not read passwords, messages, or page content, and
+        never sends this data off your device.
     </string>
 </resources>

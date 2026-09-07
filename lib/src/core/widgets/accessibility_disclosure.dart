@@ -10,12 +10,13 @@ Future<bool> showAccessibilityDisclosureDialog(BuildContext context) async {
         title: const Text('Enable Accessibility for blocking'),
         content: SingleChildScrollView(
           child: Text(
-            'To block apps in real time, AnkiBlock uses Android\'s Accessibility '
-            'service to detect which app is in the foreground and show your '
-            'flashcard study gate.\n\n'
-            'AnkiBlock does this only to enforce the blocks you set up. It does '
-            'not read passwords, messages, or other screen content, and this '
-            'data stays on your device — it is never sent off-device or sold.\n\n'
+            'To block apps and websites in real time, AnkiBlock uses Android\'s '
+            'Accessibility service to detect which app is in the foreground and '
+            'to read the address bar in supported browsers — solely to enforce '
+            'the blocks you configure and show your flashcard study gate.\n\n'
+            'AnkiBlock does not read passwords, messages, or page content. '
+            'No browsing data or other information leaves your device — it is '
+            'never sent off-device or sold.\n\n'
             'On the next screen, find AnkiBlock and turn the service on.',
             style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(height: 1.4),
           ),
