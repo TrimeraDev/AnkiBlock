@@ -67,6 +67,11 @@
                 <data android:scheme="package" />
             </intent-filter>
         </receiver>
+
+        <receiver
+            android:name=".MonitorAlarmReceiver"
+            android:exported="false"
+            android:enabled="true" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

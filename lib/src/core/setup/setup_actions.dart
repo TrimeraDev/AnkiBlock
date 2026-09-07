@@ -45,6 +45,7 @@ Future<void> updateSettingsProtection(
   WidgetRef ref, {
   String? protection,
   int? unlockMinutes,
+  bool? passwordEnabled,
 }) async {
   final db = ref.read(databaseProvider);
   await db.updateBlockRule(BlockRulesCompanion(
@@ -53,6 +54,9 @@ Future<void> updateSettingsProtection(
         protection != null ? Value(protection) : const Value.absent(),
     settingsUnlockMinutes:
         unlockMinutes != null ? Value(unlockMinutes) : const Value.absent(),
+    settingsPasswordEnabled: passwordEnabled != null
+        ? Value(passwordEnabled)
+        : const Value.absent(),
     updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
   ));
   ref.invalidate(blockRuleProvider);
@@ -101,7 +105,12 @@ Future<void> syncStudyScopeToNative(WidgetRef ref) async {
 Future<void> mergeDailyFromNative(WidgetRef ref) async {
   final native = await ref.read(appsServiceProvider).getDailyGoalState();
   final day = studyDayKey();
-  if (native.studyDayKey != day) return;
+  // After the 3am boundary native may still hold yesterday's key until Flutter
+  // syncs. Push Flutter's authoritative today count instead of skipping.
+  if (native.studyDayKey != day) {
+    await syncDailyGoalToNative(ref);
+    return;
+  }
   final db = ref.read(databaseProvider);
   final stat = await db.getDailyStat(day);
   final dbCount = stat?.cardsReviewed ?? 0;
@@ -134,6 +143,7 @@ Future<void> toggleAppBlocked(
     final ok = await ref
         .read(settingsProtectionServiceProvider)
         .requestProtectedEdit(
+          ref,
           context,
           kind: ProtectedEditKind.unblockApp,
         );

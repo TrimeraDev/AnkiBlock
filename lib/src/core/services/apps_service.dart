@@ -176,12 +176,30 @@ class AppsService {
     _channel.setMethodCallHandler(_handleNativeCall);
   }
 
+  /// Replay buffer: last gate is delivered to late subscribers (bootstrap race).
   final _gateController = StreamController<GateRequest>.broadcast();
-  Stream<GateRequest> get gateRequests => _gateController.stream;
+  GateRequest? _pendingGateReplay;
+
+  Stream<GateRequest> get gateRequests async* {
+    final pending = _pendingGateReplay;
+    if (pending != null) {
+      _pendingGateReplay = null;
+      yield pending;
+    }
+    yield* _gateController.stream;
+  }
 
   final _openHomeController = StreamController<void>.broadcast();
+  bool _pendingOpenHomeReplay = false;
+
   /// Launcher / normal app open — leave the study gate and show Today.
-  Stream<void> get openHomeRequests => _openHomeController.stream;
+  Stream<void> get openHomeRequests async* {
+    if (_pendingOpenHomeReplay) {
+      _pendingOpenHomeReplay = false;
+      yield null;
+    }
+    yield* _openHomeController.stream;
+  }
 
   final _delegatedUnlockController = StreamController<int>.broadcast();
   Stream<int> get delegatedUnlocks => _delegatedUnlockController.stream;
@@ -195,15 +213,32 @@ class AppsService {
   /// Cards credited from organic AnkiDroid study (not via AnkiBlock session).
   Stream<int> get passiveStudyProgress => _passiveStudyController.stream;
 
+  void _emitGate(GateRequest req) {
+    if (_gateController.hasListener) {
+      _gateController.add(req);
+    } else {
+      _pendingGateReplay = req;
+    }
+  }
+
+  void _emitOpenHome() {
+    _pendingGateReplay = null;
+    if (_openHomeController.hasListener) {
+      _openHomeController.add(null);
+    } else {
+      _pendingOpenHomeReplay = true;
+    }
+  }
+
   Future<dynamic> _handleNativeCall(MethodCall call) async {
     if (call.method == 'openGate') {
       final args = Map<String, dynamic>.from(call.arguments as Map);
-      _gateController.add(GateRequest(
+      _emitGate(GateRequest(
         args['packageName'] as String? ?? '',
         args['appName'] as String? ?? '',
       ));
     } else if (call.method == 'openHome') {
-      _openHomeController.add(null);
+      _emitOpenHome();
     } else if (call.method == 'onDelegatedProgress') {
       final args = Map<String, dynamic>.from(call.arguments as Map);
       final completed = (args['completed'] as num?)?.toInt() ?? 0;
@@ -449,6 +484,28 @@ class AppsService {
       raw['packageName'] as String? ?? '',
       raw['appName'] as String? ?? '',
     );
+  }
+
+  /// Tells native the Flutter gate painted so loading splash / fallback dismiss.
+  Future<void> signalGateReady() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod('onGateReady');
+    } catch (_) {}
+  }
+
+  /// Health snapshot for the permissions diagnostics panel.
+  Future<Map<String, dynamic>> getGateDiagnostics() async {
+    if (!Platform.isAndroid) return const {};
+    try {
+      final raw = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+        'getGateDiagnostics',
+      );
+      if (raw == null) return const {};
+      return Map<String, dynamic>.from(raw);
+    } catch (_) {
+      return const {};
+    }
   }
 
   Future<List<InstalledApp>> listInstalledApps({bool icons = true}) async {

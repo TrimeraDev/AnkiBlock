@@ -360,6 +360,16 @@ class $BlockRulesTable extends BlockRules
           type: DriftSqlType.string,
           requiredDuringInsert: false,
           defaultValue: const Constant('off'));
+  static const VerificationMeta _settingsPasswordEnabledMeta =
+      const VerificationMeta('settingsPasswordEnabled');
+  @override
+  late final GeneratedColumn<bool> settingsPasswordEnabled =
+      GeneratedColumn<bool>('settings_password_enabled', aliasedName, false,
+          type: DriftSqlType.bool,
+          requiredDuringInsert: false,
+          defaultConstraints: GeneratedColumn.constraintIsAlways(
+              'CHECK ("settings_password_enabled" IN (0, 1))'),
+          defaultValue: const Constant(false));
   static const VerificationMeta _settingsUnlockMinutesMeta =
       const VerificationMeta('settingsUnlockMinutes');
   @override
@@ -397,6 +407,7 @@ class $BlockRulesTable extends BlockRules
         bypassSeconds,
         studyMode,
         settingsProtection,
+        settingsPasswordEnabled,
         settingsUnlockMinutes,
         isEnabled,
         updatedAt
@@ -460,6 +471,13 @@ class $BlockRulesTable extends BlockRules
           settingsProtection.isAcceptableOrUnknown(
               data['settings_protection']!, _settingsProtectionMeta));
     }
+    if (data.containsKey('settings_password_enabled')) {
+      context.handle(
+          _settingsPasswordEnabledMeta,
+          settingsPasswordEnabled.isAcceptableOrUnknown(
+              data['settings_password_enabled']!,
+              _settingsPasswordEnabledMeta));
+    }
     if (data.containsKey('settings_unlock_minutes')) {
       context.handle(
           _settingsUnlockMinutesMeta,
@@ -501,6 +519,9 @@ class $BlockRulesTable extends BlockRules
           .read(DriftSqlType.string, data['${effectivePrefix}study_mode'])!,
       settingsProtection: attachedDatabase.typeMapping.read(
           DriftSqlType.string, data['${effectivePrefix}settings_protection'])!,
+      settingsPasswordEnabled: attachedDatabase.typeMapping.read(
+          DriftSqlType.bool,
+          data['${effectivePrefix}settings_password_enabled'])!,
       settingsUnlockMinutes: attachedDatabase.typeMapping.read(
           DriftSqlType.int, data['${effectivePrefix}settings_unlock_minutes'])!,
       isEnabled: attachedDatabase.typeMapping
@@ -530,6 +551,9 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
 
   /// `off` | `soft` | `strict`.
   final String settingsProtection;
+
+  /// When true, weakening edits also require the accountability passphrase.
+  final bool settingsPasswordEnabled;
   final int settingsUnlockMinutes;
   final bool isEnabled;
   final int updatedAt;
@@ -543,6 +567,7 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
       required this.bypassSeconds,
       required this.studyMode,
       required this.settingsProtection,
+      required this.settingsPasswordEnabled,
       required this.settingsUnlockMinutes,
       required this.isEnabled,
       required this.updatedAt});
@@ -558,6 +583,7 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
     map['bypass_seconds'] = Variable<int>(bypassSeconds);
     map['study_mode'] = Variable<String>(studyMode);
     map['settings_protection'] = Variable<String>(settingsProtection);
+    map['settings_password_enabled'] = Variable<bool>(settingsPasswordEnabled);
     map['settings_unlock_minutes'] = Variable<int>(settingsUnlockMinutes);
     map['is_enabled'] = Variable<bool>(isEnabled);
     map['updated_at'] = Variable<int>(updatedAt);
@@ -575,6 +601,7 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
       bypassSeconds: Value(bypassSeconds),
       studyMode: Value(studyMode),
       settingsProtection: Value(settingsProtection),
+      settingsPasswordEnabled: Value(settingsPasswordEnabled),
       settingsUnlockMinutes: Value(settingsUnlockMinutes),
       isEnabled: Value(isEnabled),
       updatedAt: Value(updatedAt),
@@ -596,6 +623,8 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
       studyMode: serializer.fromJson<String>(json['studyMode']),
       settingsProtection:
           serializer.fromJson<String>(json['settingsProtection']),
+      settingsPasswordEnabled:
+          serializer.fromJson<bool>(json['settingsPasswordEnabled']),
       settingsUnlockMinutes:
           serializer.fromJson<int>(json['settingsUnlockMinutes']),
       isEnabled: serializer.fromJson<bool>(json['isEnabled']),
@@ -615,6 +644,8 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
       'bypassSeconds': serializer.toJson<int>(bypassSeconds),
       'studyMode': serializer.toJson<String>(studyMode),
       'settingsProtection': serializer.toJson<String>(settingsProtection),
+      'settingsPasswordEnabled':
+          serializer.toJson<bool>(settingsPasswordEnabled),
       'settingsUnlockMinutes': serializer.toJson<int>(settingsUnlockMinutes),
       'isEnabled': serializer.toJson<bool>(isEnabled),
       'updatedAt': serializer.toJson<int>(updatedAt),
@@ -631,6 +662,7 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
           int? bypassSeconds,
           String? studyMode,
           String? settingsProtection,
+          bool? settingsPasswordEnabled,
           int? settingsUnlockMinutes,
           bool? isEnabled,
           int? updatedAt}) =>
@@ -645,6 +677,8 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
         bypassSeconds: bypassSeconds ?? this.bypassSeconds,
         studyMode: studyMode ?? this.studyMode,
         settingsProtection: settingsProtection ?? this.settingsProtection,
+        settingsPasswordEnabled:
+            settingsPasswordEnabled ?? this.settingsPasswordEnabled,
         settingsUnlockMinutes:
             settingsUnlockMinutes ?? this.settingsUnlockMinutes,
         isEnabled: isEnabled ?? this.isEnabled,
@@ -675,6 +709,9 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
       settingsProtection: data.settingsProtection.present
           ? data.settingsProtection.value
           : this.settingsProtection,
+      settingsPasswordEnabled: data.settingsPasswordEnabled.present
+          ? data.settingsPasswordEnabled.value
+          : this.settingsPasswordEnabled,
       settingsUnlockMinutes: data.settingsUnlockMinutes.present
           ? data.settingsUnlockMinutes.value
           : this.settingsUnlockMinutes,
@@ -695,6 +732,7 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
           ..write('bypassSeconds: $bypassSeconds, ')
           ..write('studyMode: $studyMode, ')
           ..write('settingsProtection: $settingsProtection, ')
+          ..write('settingsPasswordEnabled: $settingsPasswordEnabled, ')
           ..write('settingsUnlockMinutes: $settingsUnlockMinutes, ')
           ..write('isEnabled: $isEnabled, ')
           ..write('updatedAt: $updatedAt')
@@ -713,6 +751,7 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
       bypassSeconds,
       studyMode,
       settingsProtection,
+      settingsPasswordEnabled,
       settingsUnlockMinutes,
       isEnabled,
       updatedAt);
@@ -729,6 +768,7 @@ class BlockRule extends DataClass implements Insertable<BlockRule> {
           other.bypassSeconds == this.bypassSeconds &&
           other.studyMode == this.studyMode &&
           other.settingsProtection == this.settingsProtection &&
+          other.settingsPasswordEnabled == this.settingsPasswordEnabled &&
           other.settingsUnlockMinutes == this.settingsUnlockMinutes &&
           other.isEnabled == this.isEnabled &&
           other.updatedAt == this.updatedAt);
@@ -744,6 +784,7 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
   final Value<int> bypassSeconds;
   final Value<String> studyMode;
   final Value<String> settingsProtection;
+  final Value<bool> settingsPasswordEnabled;
   final Value<int> settingsUnlockMinutes;
   final Value<bool> isEnabled;
   final Value<int> updatedAt;
@@ -757,6 +798,7 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
     this.bypassSeconds = const Value.absent(),
     this.studyMode = const Value.absent(),
     this.settingsProtection = const Value.absent(),
+    this.settingsPasswordEnabled = const Value.absent(),
     this.settingsUnlockMinutes = const Value.absent(),
     this.isEnabled = const Value.absent(),
     this.updatedAt = const Value.absent(),
@@ -771,6 +813,7 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
     this.bypassSeconds = const Value.absent(),
     this.studyMode = const Value.absent(),
     this.settingsProtection = const Value.absent(),
+    this.settingsPasswordEnabled = const Value.absent(),
     this.settingsUnlockMinutes = const Value.absent(),
     this.isEnabled = const Value.absent(),
     this.updatedAt = const Value.absent(),
@@ -785,6 +828,7 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
     Expression<int>? bypassSeconds,
     Expression<String>? studyMode,
     Expression<String>? settingsProtection,
+    Expression<bool>? settingsPasswordEnabled,
     Expression<int>? settingsUnlockMinutes,
     Expression<bool>? isEnabled,
     Expression<int>? updatedAt,
@@ -800,6 +844,8 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
       if (bypassSeconds != null) 'bypass_seconds': bypassSeconds,
       if (studyMode != null) 'study_mode': studyMode,
       if (settingsProtection != null) 'settings_protection': settingsProtection,
+      if (settingsPasswordEnabled != null)
+        'settings_password_enabled': settingsPasswordEnabled,
       if (settingsUnlockMinutes != null)
         'settings_unlock_minutes': settingsUnlockMinutes,
       if (isEnabled != null) 'is_enabled': isEnabled,
@@ -817,6 +863,7 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
       Value<int>? bypassSeconds,
       Value<String>? studyMode,
       Value<String>? settingsProtection,
+      Value<bool>? settingsPasswordEnabled,
       Value<int>? settingsUnlockMinutes,
       Value<bool>? isEnabled,
       Value<int>? updatedAt}) {
@@ -831,6 +878,8 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
       bypassSeconds: bypassSeconds ?? this.bypassSeconds,
       studyMode: studyMode ?? this.studyMode,
       settingsProtection: settingsProtection ?? this.settingsProtection,
+      settingsPasswordEnabled:
+          settingsPasswordEnabled ?? this.settingsPasswordEnabled,
       settingsUnlockMinutes:
           settingsUnlockMinutes ?? this.settingsUnlockMinutes,
       isEnabled: isEnabled ?? this.isEnabled,
@@ -869,6 +918,10 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
     if (settingsProtection.present) {
       map['settings_protection'] = Variable<String>(settingsProtection.value);
     }
+    if (settingsPasswordEnabled.present) {
+      map['settings_password_enabled'] =
+          Variable<bool>(settingsPasswordEnabled.value);
+    }
     if (settingsUnlockMinutes.present) {
       map['settings_unlock_minutes'] =
           Variable<int>(settingsUnlockMinutes.value);
@@ -894,6 +947,7 @@ class BlockRulesCompanion extends UpdateCompanion<BlockRule> {
           ..write('bypassSeconds: $bypassSeconds, ')
           ..write('studyMode: $studyMode, ')
           ..write('settingsProtection: $settingsProtection, ')
+          ..write('settingsPasswordEnabled: $settingsPasswordEnabled, ')
           ..write('settingsUnlockMinutes: $settingsUnlockMinutes, ')
           ..write('isEnabled: $isEnabled, ')
           ..write('updatedAt: $updatedAt')
@@ -1756,6 +1810,7 @@ typedef $$BlockRulesTableCreateCompanionBuilder = BlockRulesCompanion Function({
   Value<int> bypassSeconds,
   Value<String> studyMode,
   Value<String> settingsProtection,
+  Value<bool> settingsPasswordEnabled,
   Value<int> settingsUnlockMinutes,
   Value<bool> isEnabled,
   Value<int> updatedAt,
@@ -1770,6 +1825,7 @@ typedef $$BlockRulesTableUpdateCompanionBuilder = BlockRulesCompanion Function({
   Value<int> bypassSeconds,
   Value<String> studyMode,
   Value<String> settingsProtection,
+  Value<bool> settingsPasswordEnabled,
   Value<int> settingsUnlockMinutes,
   Value<bool> isEnabled,
   Value<int> updatedAt,
@@ -1813,6 +1869,10 @@ class $$BlockRulesTableFilterComposer
 
   ColumnFilters<String> get settingsProtection => $composableBuilder(
       column: $table.settingsProtection,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<bool> get settingsPasswordEnabled => $composableBuilder(
+      column: $table.settingsPasswordEnabled,
       builder: (column) => ColumnFilters(column));
 
   ColumnFilters<int> get settingsUnlockMinutes => $composableBuilder(
@@ -1869,6 +1929,10 @@ class $$BlockRulesTableOrderingComposer
       column: $table.settingsProtection,
       builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<bool> get settingsPasswordEnabled => $composableBuilder(
+      column: $table.settingsPasswordEnabled,
+      builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<int> get settingsUnlockMinutes => $composableBuilder(
       column: $table.settingsUnlockMinutes,
       builder: (column) => ColumnOrderings(column));
@@ -1916,6 +1980,9 @@ class $$BlockRulesTableAnnotationComposer
   GeneratedColumn<String> get settingsProtection => $composableBuilder(
       column: $table.settingsProtection, builder: (column) => column);
 
+  GeneratedColumn<bool> get settingsPasswordEnabled => $composableBuilder(
+      column: $table.settingsPasswordEnabled, builder: (column) => column);
+
   GeneratedColumn<int> get settingsUnlockMinutes => $composableBuilder(
       column: $table.settingsUnlockMinutes, builder: (column) => column);
 
@@ -1958,6 +2025,7 @@ class $$BlockRulesTableTableManager extends RootTableManager<
             Value<int> bypassSeconds = const Value.absent(),
             Value<String> studyMode = const Value.absent(),
             Value<String> settingsProtection = const Value.absent(),
+            Value<bool> settingsPasswordEnabled = const Value.absent(),
             Value<int> settingsUnlockMinutes = const Value.absent(),
             Value<bool> isEnabled = const Value.absent(),
             Value<int> updatedAt = const Value.absent(),
@@ -1972,6 +2040,7 @@ class $$BlockRulesTableTableManager extends RootTableManager<
             bypassSeconds: bypassSeconds,
             studyMode: studyMode,
             settingsProtection: settingsProtection,
+            settingsPasswordEnabled: settingsPasswordEnabled,
             settingsUnlockMinutes: settingsUnlockMinutes,
             isEnabled: isEnabled,
             updatedAt: updatedAt,
@@ -1986,6 +2055,7 @@ class $$BlockRulesTableTableManager extends RootTableManager<
             Value<int> bypassSeconds = const Value.absent(),
             Value<String> studyMode = const Value.absent(),
             Value<String> settingsProtection = const Value.absent(),
+            Value<bool> settingsPasswordEnabled = const Value.absent(),
             Value<int> settingsUnlockMinutes = const Value.absent(),
             Value<bool> isEnabled = const Value.absent(),
             Value<int> updatedAt = const Value.absent(),
@@ -2000,6 +2070,7 @@ class $$BlockRulesTableTableManager extends RootTableManager<
             bypassSeconds: bypassSeconds,
             studyMode: studyMode,
             settingsProtection: settingsProtection,
+            settingsPasswordEnabled: settingsPasswordEnabled,
             settingsUnlockMinutes: settingsUnlockMinutes,
             isEnabled: isEnabled,
             updatedAt: updatedAt,

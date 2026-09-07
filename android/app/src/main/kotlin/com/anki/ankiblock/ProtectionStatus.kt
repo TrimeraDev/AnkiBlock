@@ -12,7 +12,8 @@ object ProtectionStatus {
         val usage = MonitorBootstrap.hasUsageAccess(context)
         val overlay = hasOverlayPermission(context)
         val batteryUnrestricted = isIgnoringBatteryOptimizations(context)
-        val monitorRunning = AppMonitorService.isRunning()
+        val monitorRunning = AppMonitorService.isRunning() &&
+            !AppMonitorService.isPollStale()
         val hasBlockedApps = MonitorBootstrap.hasBlockedPackages(context)
         val blockingEnabled = AppMonitorService.isBlockingEnabled(context)
         val protectionActive = hasBlockedApps &&
@@ -28,6 +29,7 @@ object ProtectionStatus {
             "hasBlockedApps" to hasBlockedApps,
             "blockingEnabled" to blockingEnabled,
             "protectionActive" to protectionActive,
+            "oemManufacturer" to OemSettings.manufacturerKey(),
         )
     }
 

@@ -3,11 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../di/providers.dart';
 import '../navigation/router.dart';
+import '../services/ankidroid_service.dart';
 import '../services/permission_service.dart';
 import '../theme/app_theme.dart';
 
-/// Shown under the status bar when Android blocking or protection is incomplete.
-/// Hidden during onboarding, where those permissions are requested step-by-step.
+/// Shown under the status bar when setup is incomplete: blocking off, Anki
+/// disconnected, or Android permissions missing. Hidden during onboarding.
 class GlobalBlockingPermissionBanner extends ConsumerWidget {
   const GlobalBlockingPermissionBanner({super.key});
 
@@ -20,13 +21,28 @@ class GlobalBlockingPermissionBanner extends ConsumerWidget {
         final path = router.routeInformationProvider.value.uri.path;
         if (path == '/onboarding') return const SizedBox.shrink();
 
-        final async = ref.watch(protectionStatusProvider);
-        return async.when(
+        final protectionAsync = ref.watch(protectionStatusProvider);
+        final rule = ref.watch(blockRuleProvider).valueOrNull;
+        final anki = ref.watch(ankiDroidStatusProvider).valueOrNull;
+
+        return protectionAsync.when(
           data: (status) {
-            if (!status.needsAttention) return const SizedBox.shrink();
-            return _BannerBody(status: status);
+            final issue = _SetupIssue.detect(
+              status: status,
+              blockingEnabled: rule?.isEnabled ?? true,
+              anki: anki,
+            );
+            if (issue == null) return const SizedBox.shrink();
+            return _BannerBody(issue: issue);
           },
-          loading: () => const SizedBox.shrink(),
+          loading: () {
+            final issue = _SetupIssue.detect(
+              blockingEnabled: rule?.isEnabled ?? true,
+              anki: anki,
+            );
+            if (issue == null) return const SizedBox.shrink();
+            return _BannerBody(issue: issue);
+          },
           error: (_, __) => const _BannerBody(verifyFailed: true),
         );
       },
@@ -34,12 +50,77 @@ class GlobalBlockingPermissionBanner extends ConsumerWidget {
   }
 }
 
+class _SetupIssue {
+  const _SetupIssue({required this.message, required this.fixRoute});
+
+  final String message;
+  final String fixRoute;
+
+  static _SetupIssue? detect({
+    ProtectionStatus? status,
+    required bool blockingEnabled,
+    AnkiDroidStatus? anki,
+  }) {
+    if (!blockingEnabled) {
+      return const _SetupIssue(
+        message:
+            'Blocking is turned off. Blocked apps open freely until you enable it in Settings.',
+        fixRoute: '/settings',
+      );
+    }
+    if (anki != null && !anki.isReady) {
+      return _SetupIssue(
+        message: !anki.installed
+            ? 'AnkiDroid is not installed. Connect it to study and unlock apps.'
+            : 'AnkiDroid access not granted. Connect your collection to track cards.',
+        fixRoute: '/ankidroid',
+      );
+    }
+    if (status == null) return null;
+    if (!status.needsAttention) return null;
+
+    if (!status.usage || !status.overlay) {
+      final parts = <String>[
+        if (!status.usage) 'Usage access',
+        if (!status.overlay) 'Display over other apps',
+      ];
+      final label = parts.join(' and ');
+      final message = parts.length == 2
+          ? '$label are turned off. App blocking will not work until you enable them.'
+          : '$label is turned off. App blocking will not work until you enable it.';
+      return _SetupIssue(message: message, fixRoute: '/permissions');
+    }
+    if (status.hasBlockedApps &&
+        status.blockingEnabled &&
+        !status.monitorRunning) {
+      return const _SetupIssue(
+        message:
+            'App blocking is not active. Open AnkiBlock or check Permissions '
+            'to restart protection after a reboot.',
+        fixRoute: '/permissions',
+      );
+    }
+    if (!status.batteryUnrestricted) {
+      return const _SetupIssue(
+        message:
+            'Battery optimization is on. Blocking may stop after reboot until '
+            'you exempt AnkiBlock from battery restrictions.',
+        fixRoute: '/permissions',
+      );
+    }
+    return const _SetupIssue(
+      message: 'Protection needs attention. Open Permissions to review settings.',
+      fixRoute: '/permissions',
+    );
+  }
+}
+
 class _BannerBody extends ConsumerWidget {
-  final ProtectionStatus? status;
+  final _SetupIssue? issue;
   final bool verifyFailed;
 
   const _BannerBody({
-    this.status,
+    this.issue,
     this.verifyFailed = false,
   });
 
@@ -48,7 +129,8 @@ class _BannerBody extends ConsumerWidget {
     final theme = Theme.of(context);
     final message = verifyFailed
         ? 'Could not verify protection status. Open Permissions to review settings.'
-        : _messageFor(status!);
+        : issue!.message;
+    final fixRoute = verifyFailed ? '/permissions' : issue!.fixRoute;
 
     return Material(
       color: AppTheme.warning.withValues(alpha: 0.14),
@@ -75,36 +157,12 @@ class _BannerBody extends ConsumerWidget {
                 minimumSize: Size.zero,
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
-              onPressed: () => ref.read(routerProvider).push('/permissions'),
+              onPressed: () => ref.read(routerProvider).push(fixRoute),
               child: const Text('Fix'),
             ),
           ],
         ),
       ),
     );
-  }
-
-  String _messageFor(ProtectionStatus status) {
-    if (!status.usage || !status.overlay) {
-      final parts = <String>[
-        if (!status.usage) 'Usage access',
-        if (!status.overlay) 'Display over other apps',
-      ];
-      final label = parts.join(' and ');
-      return parts.length == 2
-          ? '$label are turned off. App blocking will not work until you enable them.'
-          : '$label is turned off. App blocking will not work until you enable it.';
-    }
-    if (status.hasBlockedApps &&
-        status.blockingEnabled &&
-        !status.monitorRunning) {
-      return 'App blocking is not active. Open AnkiBlock or check Permissions '
-          'to restart protection after a reboot.';
-    }
-    if (!status.batteryUnrestricted) {
-      return 'Battery optimization is on. Blocking may stop after reboot until '
-          'you exempt AnkiBlock from battery restrictions.';
-    }
-    return 'Protection needs attention. Open Permissions to review settings.';
   }
 }

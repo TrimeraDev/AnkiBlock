@@ -442,6 +442,7 @@ class _BulkActionsHeader extends ConsumerWidget {
                   final ok = await ref
                       .read(settingsProtectionServiceProvider)
                       .requestProtectedEdit(
+                        ref,
                         context,
                         kind: ProtectedEditKind.shrinkDeckScope,
                       );
@@ -470,6 +471,7 @@ class _BulkActionsHeader extends ConsumerWidget {
                     final ok = await ref
                         .read(settingsProtectionServiceProvider)
                         .requestProtectedEdit(
+                          ref,
                           context,
                           kind: ProtectedEditKind.shrinkDeckScope,
                         );
@@ -538,6 +540,7 @@ class _DeckPickerRow extends ConsumerWidget {
           final ok = await ref
               .read(settingsProtectionServiceProvider)
               .requestProtectedEdit(
+                ref,
                 context,
                 kind: ProtectedEditKind.shrinkDeckScope,
               );

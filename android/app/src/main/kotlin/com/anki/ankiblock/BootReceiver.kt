@@ -19,7 +19,12 @@ class BootReceiver : BroadcastReceiver() {
             ACTION_QUICKBOOT_POWERON,
             -> {
                 Log.i(TAG, "Received $action — checking monitor")
-                MonitorBootstrap.startMonitorIfNeeded(context.applicationContext)
+                val app = context.applicationContext
+                // Always schedule watchdogs on boot, even if start is deferred
+                // (e.g. usage access not ready until user unlock).
+                MonitorWatchdog.schedule(app)
+                MonitorAlarmReceiver.schedule(app)
+                MonitorBootstrap.startMonitorIfNeeded(app)
             }
         }
     }

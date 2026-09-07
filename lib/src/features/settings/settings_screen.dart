@@ -7,10 +7,12 @@ import '../../core/database/database.dart';
 import '../../core/constants/support_links.dart';
 import '../../core/di/providers.dart';
 import '../../core/services/settings_protection_service.dart';
+import '../../core/services/settings_password_service.dart';
 import '../../core/setup/setup_actions.dart';
 import '../../core/support/support_actions.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/blocking_goal.dart';
+import '../../core/widgets/settings_password_ui.dart';
 import '../../core/widgets/stepped_value_picker.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -53,7 +55,9 @@ class _SettingsBody extends ConsumerWidget {
     final mode = StudyMode.fromStorage(rule?.studyMode);
     final protection =
         SettingsProtection.fromStorage(rule?.settingsProtection);
-    final settingsUnlockMinutes = rule?.settingsUnlockMinutes ?? 10;
+    final passwordEnabled = rule?.settingsPasswordEnabled ?? false;
+    final passwordConfigured =
+        ref.watch(settingsPasswordConfiguredProvider).valueOrNull ?? false;
 
     return ListView(
       children: [
@@ -61,29 +65,26 @@ class _SettingsBody extends ConsumerWidget {
         ListTile(
           leading: const Icon(Icons.lock_person_outlined),
           title: const Text('Block future-you'),
-          subtitle: Text('${protection.label} · harder to weaken settings'),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => _pickProtection(context, ref, protection),
-        ),
-        if (protection == SettingsProtection.strict)
-          ListTile(
-            leading: const Icon(Icons.hourglass_bottom_outlined),
-            title: const Text('Free-edit window'),
-            subtitle: Text('$settingsUnlockMinutes min after unlock'),
-            onTap: () async {
-              final result = await showSteppedValuePickerDialog(
-                context,
-                title: 'Free-edit window',
-                initial: settingsUnlockMinutes,
-                min: 1,
-                sliderMax: 60,
-                suffix: 'minutes',
-              );
-              if (result != null) {
-                await updateSettingsProtection(ref, unlockMinutes: result);
-              }
-            },
+          subtitle: Text(
+            blockFutureYouSubtitle(
+              protection: protection,
+              passwordEnabled: passwordEnabled,
+              passwordConfigured: passwordConfigured,
+            ),
           ),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () async {
+            await showBlockFutureYouSheet(
+              context,
+              ref,
+              currentProtection: protection,
+              passwordEnabled: passwordEnabled,
+              passwordConfigured: passwordConfigured,
+              unlockGoal: cards,
+            );
+            ref.invalidate(settingsPasswordConfiguredProvider);
+          },
+        ),
         const Divider(),
         const _SectionHeader(label: 'Unlocking'),
         ListTile(
@@ -116,6 +117,7 @@ class _SettingsBody extends ConsumerWidget {
                 final ok = await ref
                     .read(settingsProtectionServiceProvider)
                     .requestProtectedEdit(
+                      ref,
                       context,
                       kind: ProtectedEditKind.lowerDailyGoal,
                     );
@@ -144,6 +146,7 @@ class _SettingsBody extends ConsumerWidget {
               final ok = await ref
                   .read(settingsProtectionServiceProvider)
                   .requestProtectedEdit(
+                    ref,
                     context,
                     kind: ProtectedEditKind.lowerUnlockGoal,
                   );
@@ -182,6 +185,7 @@ class _SettingsBody extends ConsumerWidget {
               final ok = await ref
                   .read(settingsProtectionServiceProvider)
                   .requestProtectedEdit(
+                    ref,
                     context,
                     kind: ProtectedEditKind.disableBlocking,
                   );
@@ -202,6 +206,7 @@ class _SettingsBody extends ConsumerWidget {
               final ok = await ref
                   .read(settingsProtectionServiceProvider)
                   .requestProtectedEdit(
+                    ref,
                     context,
                     kind: ProtectedEditKind.loosenBypass,
                   );
@@ -231,6 +236,7 @@ class _SettingsBody extends ConsumerWidget {
                     final ok = await ref
                         .read(settingsProtectionServiceProvider)
                         .requestProtectedEdit(
+                          ref,
                           context,
                           kind: ProtectedEditKind.loosenBypass,
                         );
@@ -362,57 +368,13 @@ class _SettingsBody extends ConsumerWidget {
       final ok = await ref
           .read(settingsProtectionServiceProvider)
           .requestProtectedEdit(
+            ref,
             context,
             kind: ProtectedEditKind.switchToWeakerStudyMode,
           );
       if (!ok) return;
     }
     await updateStudyMode(ref, chosen.storageValue);
-  }
-
-  Future<void> _pickProtection(
-    BuildContext context,
-    WidgetRef ref,
-    SettingsProtection current,
-  ) async {
-    final chosen = await showModalBottomSheet<SettingsProtection>(
-      context: context,
-      backgroundColor: AppTheme.card,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final level in SettingsProtection.values)
-              ListTile(
-                title: Text(level.label),
-                subtitle: Text(switch (level) {
-                  SettingsProtection.off => 'No friction',
-                  SettingsProtection.soft => '30s pause before weakening',
-                  SettingsProtection.strict => 'Confirm, or study to edit freely',
-                }),
-                trailing: current == level
-                    ? const Icon(Icons.check, color: AppTheme.accent)
-                    : null,
-                onTap: () => Navigator.pop(ctx, level),
-              ),
-          ],
-        ),
-      ),
-    );
-    if (chosen == null || chosen == current) return;
-    if (isWeakeningProtection(current: current, proposed: chosen)) {
-      final ok = await ref
-          .read(settingsProtectionServiceProvider)
-          .requestProtectedEdit(
-            context,
-            kind: ProtectedEditKind.lowerProtection,
-          );
-      if (!ok) return;
-    }
-    await updateSettingsProtection(ref, protection: chosen.storageValue);
   }
 
   Future<void> _save(

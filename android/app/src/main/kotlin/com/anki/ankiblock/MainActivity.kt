@@ -8,18 +8,30 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
+import android.util.Log
+import android.util.TypedValue
+import android.view.Gravity
+import android.view.View
+import android.widget.FrameLayout
+import android.widget.ProgressBar
+import android.widget.TextView
 import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterView
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterEngineCache
 import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayOutputStream
 import java.util.Calendar
+import java.util.concurrent.Executors
 
 class MainActivity : FlutterActivity() {
     companion object {
@@ -27,6 +39,23 @@ class MainActivity : FlutterActivity() {
         const val ACTION_DISMISS_GATE = "com.ankiblock.DISMISS_GATE"
 
         private const val CHANNEL_NAME = "com.ankiblock/permissions"
+        private const val TAG = "AnkiBlock.Gate"
+        private const val GATE_PREFS = "ankiblock_pending_gate"
+        private const val KEY_PENDING_PKG = "pending_pkg"
+        private const val KEY_PENDING_NAME = "pending_name"
+        private const val KEY_PENDING_AT = "pending_at_ms"
+        private const val PENDING_GATE_TTL_MS = 120_000L
+
+        @Volatile
+        private var activeInstance: MainActivity? = null
+
+        /** In-activity fallback when system overlay permission is unavailable. */
+        fun showInActivityGateFallback(packageName: String, appName: String) {
+            val activity = activeInstance ?: return
+            activity.runOnUiThread {
+                activity.showInActivityGateFallbackInternal(packageName, appName)
+            }
+        }
 
         @Volatile
         private var flutterEventChannel: MethodChannel? = null
@@ -51,18 +80,30 @@ class MainActivity : FlutterActivity() {
     private var methodChannel: MethodChannel? = null
     private var pendingGate: Map<String, String>? = null
     private var ankiDroidApi: AnkiDroidApi? = null
+    private var gateLoadingOverlay: FrameLayout? = null
+    private var inActivityFallbackOverlay: View? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val appsIoExecutor = Executors.newSingleThreadExecutor()
 
     override fun getCachedEngineId(): String = AnkiBlockApplication.ENGINE_ID
 
     override fun shouldDestroyEngineWithHost(): Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        activeInstance = this
         if (intent?.action == ACTION_DISMISS_GATE) {
             super.onCreate(savedInstanceState)
             removeGateFromRecents()
             return
         }
+        if (intent?.action == ACTION_OPEN_GATE) {
+            prepareEngineForGateOpen(fromNewIntent = false)
+            showGateLoadingSplash()
+            GateDiagnostics.recordGateLaunch(this)
+            Log.i(TAG, "OPEN_GATE onCreate")
+        }
         super.onCreate(savedInstanceState)
+        AnkiBlockApplication.touchEngineActivity(this)
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -102,7 +143,17 @@ class MainActivity : FlutterActivity() {
                 }
                 "getInstalledApps" -> {
                     val includeIcons = call.argument<Boolean>("icons") ?: false
-                    result.success(getInstalledApps(includeIcons))
+                    // Offload icon rasterization off the platform thread.
+                    appsIoExecutor.execute {
+                        try {
+                            val apps = getInstalledApps(includeIcons)
+                            mainHandler.post { result.success(apps) }
+                        } catch (e: Throwable) {
+                            mainHandler.post {
+                                result.error("APPS_SCAN", e.message, null)
+                            }
+                        }
+                    }
                 }
                 "getUsageStats" -> {
                     val thisWeek = call.argument<Boolean>("thisWeek") ?: false
@@ -135,12 +186,31 @@ class MainActivity : FlutterActivity() {
                     intent.action = AppMonitorService.ACTION_STOP
                     stopService(intent)
                     MonitorWatchdog.cancel(this)
+                    MonitorAlarmReceiver.cancel(this)
                     result.success(true)
                 }
                 "consumePendingGate" -> {
-                    val p = pendingGate
+                    val p = pendingGate ?: loadPersistedPendingGate()
                     pendingGate = null
+                    clearPersistedPendingGate()
                     result.success(p)
+                }
+                "onGateReady" -> {
+                    GateDiagnostics.recordGateReady(this)
+                    GateFallbackOverlay.onFlutterGateReady()
+                    dismissGateLoadingSplash()
+                    dismissInActivityGateFallback()
+                    AppMonitorService.onFlutterGateReady(this)
+                    result.success(true)
+                }
+                "getGateDiagnostics" -> {
+                    result.success(GateDiagnostics.snapshot(this))
+                }
+                "openOemAutostartSettings" -> {
+                    result.success(OemSettings.openAutostartSettings(this))
+                }
+                "getOemManufacturer" -> {
+                    result.success(OemSettings.manufacturerKey())
                 }
                 "grantTempUnlock" -> {
                     val pkg = call.argument<String>("packageName") ?: ""
@@ -282,7 +352,10 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "isAppMonitorRunning" -> {
-                    result.success(AppMonitorService.isRunning())
+                    result.success(
+                        AppMonitorService.isRunning() &&
+                            !AppMonitorService.isPollStale(),
+                    )
                 }
                 else -> result.notImplemented()
             }
@@ -291,10 +364,13 @@ class MainActivity : FlutterActivity() {
         // If launched with a gate intent, surface it once channel is ready.
         // Launcher opens must not revive a leftover pending gate.
         if (isLauncherIntent(intent)) {
-            pendingGate = null
+            handleLauncherOpen()
         } else {
             consumeGateIntent(intent)
-            pendingGate?.let { notifyGateToFlutter(it) }
+            if (pendingGate == null) {
+                pendingGate = loadPersistedPendingGate()
+            }
+            deliverPendingGateToFlutter()
         }
     }
 
@@ -302,17 +378,26 @@ class MainActivity : FlutterActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         if (intent.action == ACTION_DISMISS_GATE) {
+            GateFallbackOverlay.cancelActivityFallback()
+            dismissGateLoadingSplash()
+            dismissInActivityGateFallback()
             removeGateFromRecents()
             return
         }
         if (isLauncherIntent(intent)) {
-            // Icon tap should open the normal app, not resume a leftover gate.
-            pendingGate = null
-            notifyHomeToFlutter()
+            handleLauncherOpen()
             return
         }
+        if (intent.action == ACTION_OPEN_GATE) {
+            if (prepareEngineForGateOpen(fromNewIntent = true)) {
+                return
+            }
+            showGateLoadingSplash()
+            GateDiagnostics.recordGateLaunch(this)
+            Log.i(TAG, "OPEN_GATE onNewIntent")
+        }
         consumeGateIntent(intent)
-        pendingGate?.let { notifyGateToFlutter(it) }
+        deliverPendingGateToFlutter()
     }
 
     /** Drop the gate task from recents so it doesn't linger after unlock. */
@@ -332,22 +417,199 @@ class MainActivity : FlutterActivity() {
         return categories.contains(Intent.CATEGORY_LAUNCHER)
     }
 
+    /** Icon tap — clear stale gate state and reset Flutter to the home screen. */
+    private fun handleLauncherOpen() {
+        pendingGate = null
+        clearPersistedPendingGate()
+        GateFallbackOverlay.cancelActivityFallback()
+        dismissGateLoadingSplash()
+        dismissInActivityGateFallback()
+        notifyHomeToFlutter()
+    }
+
     private fun consumeGateIntent(intent: Intent?) {
         if (intent?.action == ACTION_OPEN_GATE) {
             val pkg = intent.getStringExtra("packageName") ?: return
             val name = intent.getStringExtra("appName") ?: pkg
-            pendingGate = mapOf("packageName" to pkg, "appName" to name)
+            val payload = mapOf("packageName" to pkg, "appName" to name)
+            pendingGate = payload
+            persistPendingGate(payload)
+            Log.i(TAG, "pendingGate set for $name ($pkg)")
         }
     }
 
+    private fun persistPendingGate(payload: Map<String, String>) {
+        getSharedPreferences(GATE_PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_PENDING_PKG, payload["packageName"])
+            .putString(KEY_PENDING_NAME, payload["appName"])
+            .putLong(KEY_PENDING_AT, System.currentTimeMillis())
+            .commit()
+    }
+
+    private fun loadPersistedPendingGate(): Map<String, String>? {
+        val prefs = getSharedPreferences(GATE_PREFS, Context.MODE_PRIVATE)
+        val pkg = prefs.getString(KEY_PENDING_PKG, null) ?: return null
+        val at = prefs.getLong(KEY_PENDING_AT, 0L)
+        if (at <= 0L || System.currentTimeMillis() - at > PENDING_GATE_TTL_MS) {
+            clearPersistedPendingGate()
+            return null
+        }
+        val name = prefs.getString(KEY_PENDING_NAME, null) ?: pkg
+        return mapOf("packageName" to pkg, "appName" to name)
+    }
+
+    private fun clearPersistedPendingGate() {
+        getSharedPreferences(GATE_PREFS, Context.MODE_PRIVATE).edit().clear().apply()
+    }
+
     private fun notifyGateToFlutter(payload: Map<String, String>) {
-        methodChannel?.invokeMethod("openGate", payload)
+        // Prefer companion so pre-warmed engines without a ready MainActivity
+        // channel still receive openGate (same path as openHome).
+        notifyFlutter("openGate", payload)
+    }
+
+    private fun deliverPendingGateToFlutter() {
+        val gate = pendingGate ?: return
+        val pkg = gate["packageName"] ?: return
+        val name = gate["appName"] ?: pkg
+        notifyGateToFlutter(gate)
+        GateFallbackOverlay.scheduleActivityFallback(this, pkg, name)
+    }
+
+    /**
+     * @return true when [recreate] was called and the current intent handling
+     *     should stop (engine was replaced while this activity instance was alive).
+     */
+    private fun prepareEngineForGateOpen(fromNewIntent: Boolean): Boolean {
+        val brokenSurface = fromNewIntent && isFlutterSurfaceBroken()
+        val recycled = AnkiBlockApplication.prepareEngineForGate(
+            application,
+            brokenSurface = brokenSurface,
+        )
+        if (recycled && fromNewIntent) {
+            Log.i(TAG, "recreate MainActivity after engine recycle (broken=$brokenSurface)")
+            recreate()
+            return true
+        }
+        if (recycled) {
+            Log.i(TAG, "engine recycled for gate (brokenSurface=$brokenSurface)")
+        }
+        return false
+    }
+
+    /** True when the cached engine survived task removal with a 0×0 viewport. */
+    private fun isFlutterSurfaceBroken(): Boolean {
+        val view = findFlutterView(window?.decorView) ?: return false
+        return view.width == 0 && view.height == 0 && view.isAttachedToWindow
+    }
+
+    private fun findFlutterView(root: View?): FlutterView? {
+        if (root == null) return null
+        if (root is FlutterView) return root
+        if (root is android.view.ViewGroup) {
+            for (i in 0 until root.childCount) {
+                findFlutterView(root.getChildAt(i))?.let { return it }
+            }
+        }
+        return null
     }
 
     private fun notifyHomeToFlutter() {
         methodChannel?.invokeMethod("openHome", null)
         // Channel may not be ready yet on very early resume; companion works too.
         notifyFlutter("openHome", null)
+    }
+
+    private fun showGateLoadingSplash() {
+        mainHandler.post {
+            if (gateLoadingOverlay != null) return@post
+            val overlay = FrameLayout(this).apply {
+                setBackgroundColor(Color.parseColor("#FF081020"))
+                isClickable = true
+            }
+            val progress = ProgressBar(this).apply {
+                isIndeterminate = true
+            }
+            val label = TextView(this).apply {
+                text = "Loading study gate…"
+                setTextColor(Color.WHITE)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                gravity = Gravity.CENTER
+            }
+            val column = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                addView(progress)
+                addView(
+                    label,
+                    android.widget.LinearLayout.LayoutParams(
+                        android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                        android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                    ).apply { topMargin = 24 },
+                )
+            }
+            overlay.addView(
+                column,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.CENTER,
+                ),
+            )
+            addContentView(
+                overlay,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                ),
+            )
+            gateLoadingOverlay = overlay
+            // Splash stays until Flutter signals ready or fallback UI takes over.
+        }
+    }
+
+    private fun showInActivityGateFallbackInternal(packageName: String, appName: String) {
+        if (inActivityFallbackOverlay != null) return
+        if (GateFallbackOverlay.isFlutterReady()) return
+        dismissGateLoadingSplash()
+        val view = GateFallbackOverlay.inflateGateFallbackView(
+            this,
+            packageName,
+            appName,
+        ) {
+            GateFallbackOverlay.startStudySession(this, packageName, appName)
+            dismissInActivityGateFallback()
+        }
+        addContentView(
+            view,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        inActivityFallbackOverlay = view
+        Log.i(TAG, "in-activity gate fallback shown for $appName")
+    }
+
+    private fun dismissInActivityGateFallback() {
+        val view = inActivityFallbackOverlay ?: return
+        try {
+            (view.parent as? android.view.ViewGroup)?.removeView(view)
+        } catch (_: Throwable) {
+        }
+        inActivityFallbackOverlay = null
+    }
+
+    private fun dismissGateLoadingSplash() {
+        mainHandler.post {
+            val overlay = gateLoadingOverlay ?: return@post
+            try {
+                (overlay.parent as? android.view.ViewGroup)?.removeView(overlay)
+            } catch (_: Throwable) {
+            }
+            gateLoadingOverlay = null
+        }
     }
 
     private fun getInstalledApps(includeIcons: Boolean): List<Map<String, Any?>> {
@@ -551,6 +813,13 @@ class MainActivity : FlutterActivity() {
         if (!handled) {
             super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         }
+    }
+
+    override fun onDestroy() {
+        if (activeInstance === this) activeInstance = null
+        dismissInActivityGateFallback()
+        dismissGateLoadingSplash()
+        super.onDestroy()
     }
 
     private fun hasUsageAccess(): Boolean = MonitorBootstrap.hasUsageAccess(this)

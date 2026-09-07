@@ -43,6 +43,7 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(ref.read(appsServiceProvider).signalGateReady());
       _recordBlockedAttempt();
       _maybeAutoLaunch();
       _loadBoutPreview();
@@ -163,29 +164,48 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
 
   @override
   Widget build(BuildContext context) {
-    final ruleAsync = ref.watch(blockRuleProvider);
-    final countsAsync = ref.watch(studyCountsProvider);
-    final ankiStatusAsync = ref.watch(ankiDroidStatusProvider);
-    final decksAsync = ref.watch(ankiDroidDecksProvider);
-    final scopeAsync = ref.watch(studyScopeProvider);
+    // Narrow watches — avoid rebuilding the whole gate on unrelated provider noise.
+    final unlockGoal =
+        ref.watch(blockRuleProvider.select((a) => a.valueOrNull?.cardsRequired ?? 10));
+    final dailyGoal =
+        ref.watch(blockRuleProvider.select((a) => a.valueOrNull?.dailyCardsGoal ?? 30));
+    final mode = StudyMode.fromStorage(
+      ref.watch(blockRuleProvider.select((a) => a.valueOrNull?.studyMode)),
+    );
+    final bypassEnabled =
+        ref.watch(blockRuleProvider.select((a) => a.valueOrNull?.bypassEnabled ?? true));
+    final bypassCap =
+        ref.watch(blockRuleProvider.select((a) => a.valueOrNull?.bypassDailyCap ?? 3));
+    final counts = ref.watch(
+          studyCountsProvider.select((a) => a.valueOrNull),
+        ) ??
+        AnkiDroidCounts.zero;
+    final ankiReady = ref.watch(
+          ankiDroidStatusProvider.select((a) => a.valueOrNull?.isReady),
+        ) ??
+        false;
+    final decks = ref.watch(
+          ankiDroidDecksProvider.select((a) => a.valueOrNull),
+        ) ??
+        const <AnkiDroidDeck>[];
+    final scope = ref.watch(studyScopeProvider.select((a) => a.valueOrNull));
     final usageAsync = ref.watch(gateTodayUsageProvider(widget.packageName));
     final today = studyDayKey();
-    final dailyStatsAsync = ref.watch(dailyStatsProvider(today));
+    final reviewed = ref.watch(
+          dailyStatsProvider(today).select((a) => a.valueOrNull?.cardsReviewed),
+        ) ??
+        0;
+    final bypassesUsed = ref.watch(
+          dailyStatsProvider(today).select((a) => a.valueOrNull?.bypassesUsed),
+        ) ??
+        0;
     final streakAsync = ref.watch(studyStreakProvider);
 
-    final unlockGoal = ruleAsync.valueOrNull?.cardsRequired ?? 10;
-    final dailyGoal = ruleAsync.valueOrNull?.dailyCardsGoal ?? 30;
-    final mode = StudyMode.fromStorage(ruleAsync.valueOrNull?.studyMode);
-    final counts = countsAsync.valueOrNull ?? AnkiDroidCounts.zero;
-    final ankiReady = ankiStatusAsync.valueOrNull?.isReady ?? false;
     final obligation = counts.obligationDue;
     final available = counts.studyable;
-    final decks = decksAsync.valueOrNull ?? const [];
-    final scope = scopeAsync.valueOrNull;
     final hasDecksSelected = scope != null &&
         decks.isNotEmpty &&
         hasDecksInScope(scope, decks);
-    final reviewed = dailyStatsAsync.valueOrNull?.cardsReviewed ?? 0;
     final goalComplete = isBlockingGoalComplete(
       mode: mode,
       dailyCardsGoal: dailyGoal,
@@ -267,11 +287,7 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
                         ? 'Continue studying'
                         : 'Study in AnkiDroid');
 
-    final rule = ruleAsync.valueOrNull;
-    final bypassEnabled = rule?.bypassEnabled ?? true;
-    final bypassCap = rule?.bypassDailyCap ?? 3;
     const bypassSeconds = kBypassSeconds;
-    final bypassesUsed = dailyStatsAsync.valueOrNull?.bypassesUsed ?? 0;
     final bypassesLeft = bypassesRemaining(
       bypassEnabled: bypassEnabled,
       bypassDailyCap: bypassCap,
@@ -410,9 +426,7 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
                         ? () => context.push('/ankidroid')
                         : canStudy && !_delegating
                             ? () => _studyInAnkiDroid(
-                                  cardsRequired: unlockRemaining > 0
-                                      ? unlockRemaining
-                                      : unlockGoal,
+                                  cardsRequired: unlockGoal,
                                 )
                             : null,
                     child: Row(
@@ -465,12 +479,6 @@ class _StudyGateScreenState extends ConsumerState<StudyGateScreen>
                     child: Text('Open ${widget.appName}'),
                   ),
                 ],
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.tune),
-                  label: const Text('Change Settings'),
-                  onPressed: () => context.go('/'),
-                ),
               ],
             ),
           ),

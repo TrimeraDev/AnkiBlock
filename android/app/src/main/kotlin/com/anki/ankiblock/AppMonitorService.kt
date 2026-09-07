@@ -29,7 +29,9 @@ class AppMonitorService : Service() {
 
     companion object {
         const val CHANNEL_ID_SILENT = "ankiblock_monitor_silent"
+        const val CHANNEL_ID_ALERT = "ankiblock_protection_alert"
         const val NOTIFICATION_ID = 4242
+        const val PROTECTION_ALERT_NOTIFICATION_ID = 4243
         const val PREFS = "ankiblock_block_prefs"
         const val KEY_BLOCKED = "blocked_packages_csv"
         const val KEY_BLOCKED_NAMES = "blocked_names_csv"
@@ -80,6 +82,18 @@ class AppMonitorService : Service() {
 
         @Volatile
         private var runningInstance: AppMonitorService? = null
+
+        @Volatile
+        var lastPollMs: Long = 0L
+            private set
+
+        /** True when the service object exists but polling has stalled. */
+        fun isPollStale(thresholdMs: Long = 90_000L): Boolean {
+            if (!isRunning()) return false
+            val last = lastPollMs
+            if (last <= 0L) return false
+            return System.currentTimeMillis() - last > thresholdMs
+        }
 
         const val ANKIDROID_PACKAGE = "com.ichi2.anki"
         const val POLL_MS_IDLE = 800L
@@ -159,6 +173,10 @@ class AppMonitorService : Service() {
         }
 
         fun isRunning(): Boolean = runningInstance != null
+
+        fun onFlutterGateReady(context: Context) {
+            runningInstance?.gateFallbackOverlay?.onFlutterGateReady()
+        }
 
         fun grantTempUnlock(
             context: Context,
@@ -521,6 +539,7 @@ class AppMonitorService : Service() {
     private var lastTriggerTimes = HashMap<String, Long>()
     private var pollStart = 0L
     private lateinit var overlayManager: CompletionOverlayManager
+    private var gateFallbackOverlay: GateFallbackOverlay? = null
     private var ankiApi: AnkiDroidApi? = null
     private val keyTrackers = mutableMapOf<String, AnkiDroidApi.KeyTracker>()
     private val passiveKeyTrackers = mutableMapOf<String, AnkiDroidApi.KeyTracker>()
@@ -528,12 +547,15 @@ class AppMonitorService : Service() {
     /** In-memory streak — prefs apply() can lose increments across 500ms polls. */
     private var delegatedCompleteStreak = 0
     private var lastPassiveWatching = false
+    private var lastStudyDayRolloverCheckMs = 0L
 
     private val pollRunnable = object : Runnable {
         override fun run() {
             try {
                 tick()
-            } catch (_: Throwable) {
+            } catch (e: Throwable) {
+                Log.w(TAG, "monitor tick failed", e)
+                GateDiagnostics.recordError(this@AppMonitorService, "tick: ${e.message}")
             }
             val interval = when {
                 hasDelegatedSession(prefs) -> POLL_MS_DELEGATED
@@ -551,15 +573,20 @@ class AppMonitorService : Service() {
         runningInstance = this
         prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         overlayManager = CompletionOverlayManager(this)
+        gateFallbackOverlay = GateFallbackOverlay(this)
         ankiApi = AnkiDroidApi(applicationContext)
         AnkiBlockApplication.warmFlutterEngine(application as android.app.Application)
         createChannels()
         clearStaleDelegatedSession()
         repairPassiveMergeState()
+        ensureStudyDayRollover()
         promoteToForeground()
         pollStart = System.currentTimeMillis() - 60_000
         currentForegroundPackage = queryMostRecentForegroundPackage()
         handler.post(pollRunnable)
+        GateDiagnostics.recordMonitorRestart(this)
+        MonitorAlarmReceiver.schedule(this)
+        MonitorWatchdog.schedule(this)
     }
 
     private fun promoteToForeground() {
@@ -618,10 +645,19 @@ class AppMonitorService : Service() {
         return START_STICKY
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        Log.i(TAG, "onTaskRemoved — scheduling monitor restart")
+        AnkiBlockApplication.markActivityTaskRemoved(applicationContext)
+        MonitorAlarmReceiver.scheduleImmediate(applicationContext)
+        MonitorBootstrap.startMonitorIfNeeded(applicationContext)
+    }
+
     override fun onDestroy() {
         if (runningInstance === this) runningInstance = null
         handler.removeCallbacks(pollRunnable)
         overlayManager.dismiss()
+        gateFallbackOverlay?.dismiss()
         super.onDestroy()
     }
 
@@ -639,6 +675,16 @@ class AppMonitorService : Service() {
                     setShowBadge(false)
                 },
             )
+            nm.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_ID_ALERT,
+                    "Protection alerts",
+                    NotificationManager.IMPORTANCE_DEFAULT,
+                ).apply {
+                    description =
+                        "Alerts when app blocking stops unexpectedly."
+                },
+            )
         }
     }
 
@@ -654,11 +700,8 @@ class AppMonitorService : Service() {
             .setShowWhen(false)
             .setSilent(true)
             .setOnlyAlertOnce(true)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            builder.setForegroundServiceBehavior(
-                NotificationCompat.FOREGROUND_SERVICE_DEFERRED,
-            )
-        }
+        // Promote FGS immediately — deferred behavior delayed gate reliability
+        // on OEMs that aggressively cull background work overnight.
         return builder.build()
     }
 
@@ -714,6 +757,13 @@ class AppMonitorService : Service() {
     }
 
     private fun tick() {
+        lastPollMs = System.currentTimeMillis()
+        GateDiagnostics.recordPoll(this)
+        val now = System.currentTimeMillis()
+        if (now - lastStudyDayRolloverCheckMs > 60_000L) {
+            lastStudyDayRolloverCheckMs = now
+            ensureStudyDayRollover()
+        }
         val foreground = queryLatestForegroundPackage()
         if (hasDelegatedSession(prefs)) {
             checkDelegatedProgress(foreground)
@@ -722,6 +772,44 @@ class AppMonitorService : Service() {
         }
         checkBlockedAppGate(foreground)
         checkExpiredUnlockWhileForeground(foreground)
+    }
+
+    /**
+     * Rolls native daily-goal state across the 3am study-day boundary without
+     * waiting for Flutter to resume.
+     */
+    private fun ensureStudyDayRollover() {
+        val today = studyDayKey()
+        val stored = prefs.getString(KEY_STUDY_DAY, null)
+        if (stored == today) {
+            ensurePassiveStudyDay()
+            return
+        }
+        Log.i(TAG, "study day rollover $stored -> $today")
+        prefs.edit()
+            .putString(KEY_STUDY_DAY, today)
+            .putInt(KEY_DAILY_REVIEWED, 0)
+            .putInt(KEY_PASSIVE_APPLIED_TO_DAILY, 0)
+            .apply()
+        ensurePassiveStudyDay()
+        clearExpiredUnlocks()
+    }
+
+    private fun clearExpiredUnlocks() {
+        val blockedCsv = prefs.getString(KEY_BLOCKED, "") ?: ""
+        if (blockedCsv.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val editor = prefs.edit()
+        var changed = false
+        for (pkg in blockedCsv.split("|").filter { it.isNotEmpty() }) {
+            val key = unlockUntilKey(pkg)
+            val until = prefs.getLong(key, 0L)
+            if (until > 0L && until <= now) {
+                editor.remove(key)
+                changed = true
+            }
+        }
+        if (changed) editor.apply()
     }
 
     private fun queryLatestForegroundPackage(): String? {
@@ -1221,6 +1309,7 @@ class AppMonitorService : Service() {
     }
 
     private fun launchFlutterGate(pkg: String, displayName: String) {
+        Log.i(TAG, "launchFlutterGate $displayName ($pkg)")
         val intent = Intent(this, MainActivity::class.java).apply {
             action = MainActivity.ACTION_OPEN_GATE
             putExtra("packageName", pkg)
@@ -1233,6 +1322,8 @@ class AppMonitorService : Service() {
             startActivity(intent)
         } catch (e: Throwable) {
             Log.w(TAG, "Flutter gate launch failed for $displayName", e)
+            GateDiagnostics.recordError(this, "gate launch failed: ${e.message}")
+            gateFallbackOverlay?.show(pkg, displayName)
         }
     }
 }

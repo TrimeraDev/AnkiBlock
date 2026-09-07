@@ -25,10 +25,26 @@ object MonitorBootstrap {
         if (!shouldStartMonitor(context)) {
             if (!hasBlockedPackages(context)) {
                 MonitorWatchdog.cancel(context)
+                MonitorAlarmReceiver.cancel(context)
+            } else {
+                // Still schedule watchdogs so we retry when usage access returns.
+                MonitorWatchdog.schedule(context)
+                MonitorAlarmReceiver.schedule(context)
             }
             return false
         }
-        if (AppMonitorService.isRunning()) return true
+        if (AppMonitorService.isRunning()) {
+            if (AppMonitorService.isPollStale()) {
+                Log.w(TAG, "Monitor poll stale — forcing restart")
+                GateDiagnostics.recordPollStale(context)
+                forceStopMonitor(context)
+            } else {
+                ProtectionDownNotifier.dismiss(context)
+                MonitorWatchdog.schedule(context)
+                MonitorAlarmReceiver.schedule(context)
+                return true
+            }
+        }
         return try {
             val intent = Intent(context, AppMonitorService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -37,10 +53,15 @@ object MonitorBootstrap {
                 context.startService(intent)
             }
             MonitorWatchdog.schedule(context)
+            MonitorAlarmReceiver.schedule(context)
+            ProtectionDownNotifier.dismiss(context)
             Log.i(TAG, "AppMonitorService start requested")
             true
         } catch (e: Throwable) {
             Log.w(TAG, "Failed to start AppMonitorService", e)
+            GateDiagnostics.recordError(context, "monitor start failed: ${e.message}")
+            MonitorWatchdog.schedule(context)
+            MonitorAlarmReceiver.schedule(context)
             false
         }
     }
@@ -68,5 +89,16 @@ object MonitorBootstrap {
             )
         }
         return mode == AppOpsManager.MODE_ALLOWED
+    }
+
+    private fun forceStopMonitor(context: Context) {
+        try {
+            val intent = Intent(context, AppMonitorService::class.java).apply {
+                action = AppMonitorService.ACTION_STOP
+            }
+            context.stopService(intent)
+        } catch (e: Throwable) {
+            Log.w(TAG, "force stop monitor failed", e)
+        }
     }
 }

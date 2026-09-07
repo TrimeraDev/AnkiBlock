@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -6,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/di/providers.dart';
 import '../../core/services/permission_service.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/diagnostics_report.dart';
 
 class PermissionsScreen extends ConsumerStatefulWidget {
   const PermissionsScreen({super.key});
@@ -17,7 +19,10 @@ class PermissionsScreen extends ConsumerStatefulWidget {
 class _PermissionsScreenState extends ConsumerState<PermissionsScreen>
     with WidgetsBindingObserver {
   ProtectionStatus? _status;
+  String _diagnosticsReport = '';
   bool _loading = true;
+  bool _showDiagnostics = false;
+  bool _copyFeedback = false;
 
   @override
   void initState() {
@@ -42,12 +47,23 @@ class _PermissionsScreenState extends ConsumerState<PermissionsScreen>
   Future<void> _refresh() async {
     final svc = ref.read(permissionServiceProvider);
     final status = await svc.getProtectionStatus();
+    final inputs = await gatherDiagnosticsInputs(ref);
     if (!mounted) return;
     setState(() {
       _status = status;
+      _diagnosticsReport = formatDiagnosticsReport(inputs);
       _loading = false;
     });
     ref.invalidate(protectionStatusProvider);
+  }
+
+  Future<void> _copyDiagnostics() async {
+    await Clipboard.setData(ClipboardData(text: _diagnosticsReport));
+    if (!mounted) return;
+    setState(() => _copyFeedback = true);
+    Future<void>.delayed(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _copyFeedback = false);
+    });
   }
 
   @override
@@ -61,6 +77,15 @@ class _PermissionsScreenState extends ConsumerState<PermissionsScreen>
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.pop(),
         ),
+        actions: [
+          IconButton(
+            icon: Icon(
+              _showDiagnostics ? Icons.bug_report : Icons.bug_report_outlined,
+            ),
+            tooltip: 'Diagnostics',
+            onPressed: () => setState(() => _showDiagnostics = !_showDiagnostics),
+          ),
+        ],
       ),
       body: _loading || status == null
           ? const Center(child: CircularProgressIndicator())
@@ -97,11 +122,29 @@ class _PermissionsScreenState extends ConsumerState<PermissionsScreen>
                   icon: Icons.battery_charging_full_outlined,
                   title: 'Unrestricted battery',
                   subtitle:
-                      'Prevents the system from stopping blocking after reboot '
-                      'or when the app is in the background.',
+                      'Required so blocking survives overnight and reboot. '
+                      'Without this, OEMs may kill the monitor.',
                   granted: status.batteryUnrestricted,
                   onRequest: svc.requestBatteryOptimizationExemption,
                 ),
+                if (status.needsOemAutostartHelp) ...[
+                  const Divider(height: 32),
+                  const _SectionHeader(label: 'Device-specific'),
+                  ListTile(
+                    leading: const Icon(Icons.phonelink_setup_outlined),
+                    title: Text(
+                      '${_oemLabel(status.oemManufacturer)} autostart / battery',
+                    ),
+                    subtitle: const Text(
+                      'Open system settings so AnkiBlock can keep running in '
+                      'the background on this phone.',
+                    ),
+                    trailing: ElevatedButton(
+                      onPressed: () => svc.openOemAutostartSettings(),
+                      child: const Text('Open'),
+                    ),
+                  ),
+                ],
                 const Divider(height: 32),
                 const _SectionHeader(label: 'AnkiDroid'),
                 ListTile(
@@ -125,7 +168,7 @@ class _PermissionsScreenState extends ConsumerState<PermissionsScreen>
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Text(
                     'AnkiBlock restarts its monitor automatically after reboot. '
-                    'On some phones (Samsung, Xiaomi, Huawei, etc.) you may also '
+                    'On some phones (Samsung, Xiaomi, Honor, Huawei, etc.) you may also '
                     'need to enable autostart or remove AnkiBlock from sleeping-apps '
                     'lists in system settings.',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
@@ -142,9 +185,73 @@ class _PermissionsScreenState extends ConsumerState<PermissionsScreen>
                     label: const Text('Device-specific battery tips'),
                   ),
                 ),
+                if (_showDiagnostics) ...[
+                  const Divider(height: 32),
+                  const _SectionHeader(label: 'Diagnostics'),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    child: Text(
+                      'Copy this report when filing a bug. It includes device '
+                      'info, permissions, blocking config, monitor health, and '
+                      'recent errors — no card content or passwords.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: AppTheme.onSurfaceVariant,
+                            height: 1.35,
+                          ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed:
+                            _diagnosticsReport.isEmpty ? null : _copyDiagnostics,
+                        icon: Icon(
+                          _copyFeedback ? Icons.check : Icons.copy,
+                          size: 18,
+                        ),
+                        label: Text(
+                          _copyFeedback ? 'Copied' : 'Copy diagnostics',
+                        ),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                    child: SelectableText(
+                      _diagnosticsReport,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            fontFamily: 'monospace',
+                            height: 1.4,
+                          ),
+                    ),
+                  ),
+                ],
               ],
             ),
     );
+  }
+
+  String _oemLabel(String key) {
+    switch (key) {
+      case 'xiaomi':
+        return 'Xiaomi / MIUI';
+      case 'huawei':
+        return 'Huawei';
+      case 'honor':
+        return 'Honor';
+      case 'samsung':
+        return 'Samsung';
+      case 'oppo':
+        return 'OPPO';
+      case 'oneplus':
+        return 'OnePlus';
+      case 'vivo':
+        return 'vivo';
+      default:
+        return key;
+    }
   }
 
   Future<void> _openDontKillMyApp() async {

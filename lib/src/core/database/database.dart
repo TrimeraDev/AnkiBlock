@@ -42,6 +42,9 @@ class BlockRules extends Table {
   /// `off` | `soft` | `strict`.
   TextColumn get settingsProtection =>
       text().withDefault(const Constant('off'))();
+  /// When true, weakening edits also require the accountability passphrase.
+  BoolColumn get settingsPasswordEnabled =>
+      boolean().withDefault(const Constant(false))();
   IntColumn get settingsUnlockMinutes =>
       integer().withDefault(const Constant(10))();
   BoolColumn get isEnabled => boolean().withDefault(const Constant(true))();
@@ -97,7 +100,7 @@ class AppDatabase extends _$AppDatabase {
   }
 
   @override
-  int get schemaVersion => 10;
+  int get schemaVersion => 11;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -115,6 +118,13 @@ class AppDatabase extends _$AppDatabase {
           );
         },
         onUpgrade: (m, from, to) async {
+          if (from < 11) {
+            await m.database.customStatement(
+              'ALTER TABLE block_rules '
+              'ADD COLUMN settings_password_enabled INTEGER NOT NULL DEFAULT 0 '
+              'CHECK (settings_password_enabled IN (0, 1))',
+            );
+          }
           if (from < 10) {
             // New default unlock grace is 15m; bump users still on the old 10m default.
             await m.database.customStatement(

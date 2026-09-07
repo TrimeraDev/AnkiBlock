@@ -63,6 +63,7 @@ class StudyModePanel extends ConsumerWidget {
               final ok = await ref
                   .read(settingsProtectionServiceProvider)
                   .requestProtectedEdit(
+                    ref,
                     context,
                     kind: ProtectedEditKind.switchToWeakerStudyMode,
                   );
@@ -212,6 +213,7 @@ class _UnlockGoalPanelState extends ConsumerState<UnlockGoalPanel> {
       final ok = await ref
           .read(settingsProtectionServiceProvider)
           .requestProtectedEdit(
+            ref,
             context,
             kind: ProtectedEditKind.lowerUnlockGoal,
           );
@@ -310,6 +312,7 @@ class _DailyGoalPanelState extends ConsumerState<DailyGoalPanel> {
       final ok = await ref
           .read(settingsProtectionServiceProvider)
           .requestProtectedEdit(
+            ref,
             context,
             kind: ProtectedEditKind.lowerDailyGoal,
           );

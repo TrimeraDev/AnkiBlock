@@ -96,6 +96,12 @@ bool isWeakeningBypassCap({required int current, required int proposed}) =>
 /// Fixed emergency bypass window (no longer user-configurable).
 const int kBypassSeconds = 60;
 
+/// Soft protection: pause before tapping Confirm.
+const int kSettingsProtectionSoftWaitSeconds = 30;
+
+/// Strict protection: wait after finishing the required study session.
+const int kSettingsProtectionStrictWaitSeconds = 30;
+
 bool isWeakeningProtection({
   required SettingsProtection current,
   required SettingsProtection proposed,

@@ -38,6 +38,8 @@ class TodayScreen extends ConsumerWidget {
     final decksAsync = ref.watch(ankiDroidDecksProvider);
     final scopeAsync = ref.watch(studyScopeProvider);
 
+    // Derive display values via select-friendly locals (same providers; keep
+    // AsyncValue handles for child widgets that need loading/error states).
     final dailyGoal = ruleAsync.valueOrNull?.dailyCardsGoal ?? 30;
     final unlockGoal = ruleAsync.valueOrNull?.cardsRequired ?? 10;
     final mode = StudyMode.fromStorage(ruleAsync.valueOrNull?.studyMode);
@@ -562,7 +564,14 @@ class _MiniAppIcon extends StatelessWidget {
         ),
         clipBehavior: Clip.antiAlias,
         child: icon != null
-            ? Image.memory(icon!, fit: BoxFit.cover, gaplessPlayback: true)
+            ? Image.memory(
+                icon!,
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+                cacheWidth: 96,
+                cacheHeight: 96,
+                filterQuality: FilterQuality.low,
+              )
             : const Icon(Icons.android, size: 16),
       ),
     );

@@ -160,6 +160,22 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
   }
 
   void _next() {
+    // Battery exemption is required for overnight reliability on aggressive OEMs.
+    if (_page == _permsPage &&
+        (!_hasUsage || !_hasOverlay || !_hasBattery)) {
+      final missing = <String>[
+        if (!_hasUsage) 'Usage access',
+        if (!_hasOverlay) 'Display over apps',
+        if (!_hasBattery) 'Unrestricted battery',
+      ].join(', ');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Please enable: $missing'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
     if (_page < _pageCount - 1) {
       _controller.nextPage(
         duration: const Duration(milliseconds: 240),
@@ -520,10 +536,17 @@ class _BlockingPermissionsPage extends StatelessWidget {
           const SizedBox(height: 12),
           _PermissionRow(
             icon: Icons.battery_charging_full_outlined,
-            title: 'Unrestricted battery',
+            title: 'Unrestricted battery (required)',
             granted: hasBattery,
             opensSettings: false,
             onGrant: onRequestBattery,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Without this, many phones kill blocking overnight.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: AppTheme.onSurfaceVariant,
+                ),
           ),
         ],
       ),

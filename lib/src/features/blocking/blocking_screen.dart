@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -21,9 +23,10 @@ class BlockingScreen extends ConsumerStatefulWidget {
 
 class _BlockingScreenState extends ConsumerState<BlockingScreen>
     with WidgetsBindingObserver {
-  String _query = '';
+  String _debouncedQuery = '';
   bool _hideSystem = true;
   _SortMode _sort = _SortMode.usage;
+  Timer? _searchDebounce;
 
   @override
   void initState() {
@@ -34,8 +37,17 @@ class _BlockingScreenState extends ConsumerState<BlockingScreen>
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  void _onQueryChanged(String v) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 200), () {
+      if (!mounted) return;
+      setState(() => _debouncedQuery = v);
+    });
   }
 
   @override
@@ -111,8 +123,8 @@ class _BlockingScreenState extends ConsumerState<BlockingScreen>
               blockedRecords.map((b) => b.packageName).toSet();
 
           bool matchesQuery(InstalledApp a) {
-            if (_query.isEmpty) return true;
-            final q = _query.toLowerCase();
+            if (_debouncedQuery.isEmpty) return true;
+            final q = _debouncedQuery.toLowerCase();
             return a.appName.toLowerCase().contains(q) ||
                 a.packageName.toLowerCase().contains(q);
           }
@@ -168,7 +180,7 @@ class _BlockingScreenState extends ConsumerState<BlockingScreen>
             for (final app in blockedApps) {
               listEntries.add(_BlockingListEntry.app(app));
             }
-            if (otherApps.isNotEmpty && _query.isEmpty) {
+            if (otherApps.isNotEmpty && _debouncedQuery.isEmpty) {
               listEntries.add(const _BlockingListEntry.header('All apps'));
             }
           }
@@ -185,11 +197,11 @@ class _BlockingScreenState extends ConsumerState<BlockingScreen>
               if (refreshingApps)
                 const LinearProgressIndicator(minHeight: 2),
               _SearchBar(
-                onChanged: (v) => setState(() => _query = v),
+                onChanged: _onQueryChanged,
                 hideSystem: _hideSystem,
                 onToggleHideSystem: (v) => setState(() => _hideSystem = v),
               ),
-              if (suggested.isNotEmpty && _query.isEmpty)
+              if (suggested.isNotEmpty && _debouncedQuery.isEmpty)
                 _SuggestedBanner(
                   apps: suggested,
                   blockedSet: blockedSet,
@@ -227,6 +239,7 @@ class _BlockingScreenState extends ConsumerState<BlockingScreen>
       final ok = await ref
           .read(settingsProtectionServiceProvider)
           .requestProtectedEdit(
+            ref,
             context,
             kind: ProtectedEditKind.unblockApp,
           );
@@ -505,7 +518,13 @@ class _AppTile extends StatelessWidget {
         child: app.icon != null
             ? ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                child: Image.memory(app.icon!, gaplessPlayback: true),
+                child: Image.memory(
+                  app.icon!,
+                  gaplessPlayback: true,
+                  cacheWidth: 80,
+                  cacheHeight: 80,
+                  filterQuality: FilterQuality.low,
+                ),
               )
             : const Icon(Icons.android),
       ),

@@ -11,6 +11,7 @@ class ProtectionStatus {
     required this.hasBlockedApps,
     required this.blockingEnabled,
     required this.protectionActive,
+    this.oemManufacturer = 'unknown',
   });
 
   final bool usage;
@@ -20,6 +21,7 @@ class ProtectionStatus {
   final bool hasBlockedApps;
   final bool blockingEnabled;
   final bool protectionActive;
+  final String oemManufacturer;
 
   bool get permissionsComplete => usage && overlay;
 
@@ -27,6 +29,19 @@ class ProtectionStatus {
       !permissionsComplete ||
       (hasBlockedApps && blockingEnabled && !protectionActive) ||
       !batteryUnrestricted;
+
+  bool get needsOemAutostartHelp {
+    const aggressive = {
+      'huawei',
+      'honor',
+      'xiaomi',
+      'samsung',
+      'oppo',
+      'oneplus',
+      'vivo',
+    };
+    return aggressive.contains(oemManufacturer);
+  }
 
   factory ProtectionStatus.fromMap(Map<dynamic, dynamic> map) {
     bool b(dynamic v) => v == true;
@@ -38,6 +53,7 @@ class ProtectionStatus {
       hasBlockedApps: b(map['hasBlockedApps']),
       blockingEnabled: b(map['blockingEnabled']),
       protectionActive: b(map['protectionActive']),
+      oemManufacturer: map['oemManufacturer'] as String? ?? 'unknown',
     );
   }
 }
@@ -150,6 +166,26 @@ class PermissionService {
         blockingEnabled: true,
         protectionActive: false,
       );
+    }
+  }
+
+  Future<bool> openOemAutostartSettings() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      final ok = await _channel.invokeMethod<bool>('openOemAutostartSettings');
+      return ok ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<String> getOemManufacturer() async {
+    if (!Platform.isAndroid) return 'unknown';
+    try {
+      final m = await _channel.invokeMethod<String>('getOemManufacturer');
+      return m ?? 'unknown';
+    } catch (_) {
+      return 'unknown';
     }
   }
 

@@ -5,7 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/di/providers.dart';
 import 'core/navigation/router.dart';
+import 'core/services/ankidroid_service.dart';
 import 'core/services/apps_service.dart';
+import 'core/services/settings_protection_service.dart';
 import 'core/setup/setup_actions.dart';
 import 'core/theme/app_theme.dart';
 import 'core/utils/study_day.dart';
@@ -182,49 +184,88 @@ class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
 
   Future<void> _routeGate(GateRequest req) async {
     final router = ref.read(routerProvider);
-    final apps = ref.read(appsServiceProvider);
-    final rule = await ref.read(blockRuleProvider.future);
-    final day = studyDayKey();
-    final reviewed =
-        (await ref.read(databaseProvider).getDailyStat(day))?.cardsReviewed ?? 0;
-    final mode = StudyMode.fromStorage(rule?.studyMode);
-    final due = (await ref.read(studyCountsProvider.future)).obligationDue;
-    if (isBlockingGoalComplete(
-      mode: mode,
-      dailyCardsGoal: rule?.dailyCardsGoal ?? 0,
-      cardsReviewed: reviewed,
-      obligationDue: due,
-    )) {
-      await apps.launchApp(req.packageName);
-      router.go('/');
-      return;
-    }
 
-    final unlockGoal = rule?.cardsRequired ?? 10;
-    if (await apps.isTemporarilyUnlocked(req.packageName)) {
-      await apps.launchApp(req.packageName);
-      router.go('/');
-      return;
-    }
-    if (await apps.tryUnlockFromRecentBout(
-      packageName: req.packageName,
-      appName: req.appName,
-      target: unlockGoal,
-    )) {
-      await apps.launchApp(req.packageName);
-      router.go('/');
-      return;
-    }
-
-    // Blocked — show the full Flutter gate (engine is pre-warmed).
+    // Paint the gate immediately — never wait on AnkiDroid / Drift before
+    // navigation. Overnight hangs on ContentProvider used to leave a blank
+    // MainActivity while native blocking had already fired.
     router.go('/gate', extra: {
       'packageName': req.packageName,
       'appName': req.appName,
     });
+    // StudyGateScreen signals ready after its first frame paints — calling
+    // here dismissed the native splash before Flutter rendered (blank screen).
     unawaited(_restoreDelegatedSessionProgress());
+    unawaited(_resolveGateShortcuts(req));
+  }
+
+  /// After the gate is visible, skip it when the user is already free.
+  Future<void> _resolveGateShortcuts(GateRequest req) async {
+    final router = ref.read(routerProvider);
+    final apps = ref.read(appsServiceProvider);
+    try {
+      final unlocked = await apps
+          .isTemporarilyUnlocked(req.packageName)
+          .timeout(const Duration(seconds: 2), onTimeout: () => false);
+      if (unlocked) {
+        await apps.launchApp(req.packageName);
+        router.go('/');
+        return;
+      }
+
+      final rule = await ref
+          .read(blockRuleProvider.future)
+          .timeout(const Duration(seconds: 2));
+      final unlockGoal = rule?.cardsRequired ?? 10;
+      if (await apps
+          .tryUnlockFromRecentBout(
+            packageName: req.packageName,
+            appName: req.appName,
+            target: unlockGoal,
+          )
+          .timeout(const Duration(seconds: 2), onTimeout: () => false)) {
+        await apps.launchApp(req.packageName);
+        router.go('/');
+        return;
+      }
+
+      final day = studyDayKey();
+      final reviewed = (await ref
+                  .read(databaseProvider)
+                  .getDailyStat(day)
+                  .timeout(const Duration(seconds: 2)))
+              ?.cardsReviewed ??
+          0;
+      final mode = StudyMode.fromStorage(rule?.studyMode);
+      // Bound AnkiDroid due-count lookup — hang must not strand the gate.
+      int due = 0;
+      try {
+        final counts = await ref.read(studyCountsProvider.future).timeout(
+              const Duration(seconds: 2),
+              onTimeout: () => AnkiDroidCounts.zero,
+            );
+        due = counts.obligationDue;
+      } catch (_) {
+        due = 0;
+      }
+      if (isBlockingGoalComplete(
+        mode: mode,
+        dailyCardsGoal: rule?.dailyCardsGoal ?? 0,
+        cardsReviewed: reviewed,
+        obligationDue: due,
+      )) {
+        await apps.launchApp(req.packageName);
+        router.go('/');
+      }
+    } catch (_) {
+      // Keep the gate visible on any shortcut-check failure.
+    }
   }
 
   Future<void> _handleDelegatedUnlock(int cardsCompleted) async {
+    final protectionSvc = ref.read(settingsProtectionServiceProvider);
+    if (await protectionSvc.consumeStrictStudyPending()) {
+      await protectionSvc.recordStrictStudyCompleted();
+    }
     ref.read(delegatedSessionProgressProvider.notifier).state = null;
     ref.read(delegatedProgressCreditFloorProvider.notifier).state = 0;
     _lastProgressCounted = 0;

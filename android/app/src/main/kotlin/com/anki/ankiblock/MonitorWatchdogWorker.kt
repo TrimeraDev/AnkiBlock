@@ -13,10 +13,14 @@ class MonitorWatchdogWorker(
     params: WorkerParameters,
 ) : CoroutineWorker(appContext, params) {
     override suspend fun doWork(): Result {
-        return if (MonitorBootstrap.startMonitorIfNeeded(applicationContext)) {
-            Result.success()
-        } else {
-            Result.success()
+        val started = MonitorBootstrap.startMonitorIfNeeded(applicationContext)
+        MonitorAlarmReceiver.schedule(applicationContext)
+        if (!started &&
+            MonitorBootstrap.shouldStartMonitor(applicationContext) &&
+            (!AppMonitorService.isRunning() || AppMonitorService.isPollStale())
+        ) {
+            ProtectionDownNotifier.show(applicationContext)
         }
+        return Result.success()
     }
 }
