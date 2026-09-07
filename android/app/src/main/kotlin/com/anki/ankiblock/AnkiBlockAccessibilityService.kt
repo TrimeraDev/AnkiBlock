@@ -13,13 +13,39 @@ import android.view.accessibility.AccessibilityEvent
 /**
  * Event-driven blocker: detects foreground package changes via Accessibility
  * events, reads browser address bars for website rules, draws the native study
- * gate, and tracks AnkiDroid reviews with ContentObserver + a short poll.
+ * gate, and tracks AnkiDroid reviews from Anki UI change events (plus a
+ * ContentObserver for API-path writes — the Reviewer itself does not notify).
  */
 class AnkiBlockAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val TAG = "AnkiBlock.A11y"
         private const val URL_CHECK_THROTTLE_MS = 400L
+
+        /**
+         * After tapping "Study", we launch AnkiDroid and dismiss the gate. The
+         * blocked app stays foreground for a beat before AnkiDroid takes over,
+         * firing more window events. Suppress re-gating that package during this
+         * window so the user isn't bounced back to the gate they just left.
+         */
+        private const val STUDY_LAUNCH_GRACE_MS = 6_000L
+
+        /** Coalesce the burst of DB-change callbacks per review into one check. */
+        private const val STUDY_TICK_DEBOUNCE_MS = 200L
+
+        /**
+         * Slow backup tick while a delegated session is active and Anki is
+         * foreground — covers OEMs that throttle WINDOW_CONTENT_CHANGED.
+         * Not a continuous poll: only armed during active study sessions.
+         */
+        private const val STUDY_SAFETY_TICK_MS = 3_000L
+
+        /**
+         * When leaving a gated app for launcher/recents/etc., wait briefly
+         * before tearing the gate down. Switching blocked→blocked (or a
+         * transient window) would otherwise dismiss then re-show = flicker.
+         */
+        private const val GATE_DISMISS_DEBOUNCE_MS = 300L
 
         /** Windows from these packages never count as "the user switched app". */
         private val TRANSIENT_PACKAGES = setOf(
@@ -59,19 +85,56 @@ class AnkiBlockAccessibilityService : AccessibilityService() {
     private var pendingUrlCheckPkg: String? = null
     private var lastUrlCheckMs = 0L
     private var lastUrlHost: String = ""
+    private var deferredGateDismissRunnable: Runnable? = null
+    @Volatile private var studyLaunchGracePkg: String? = null
+    @Volatile private var studyLaunchGraceUntilMs = 0L
+    private var delegatedTrackersLoaded = false
 
-    private val studyPollRunnable = object : Runnable {
+    /**
+     * Coalesces the burst of ContentObserver callbacks AnkiDroid emits per
+     * review into a single progress check. This is a short debounce, not a
+     * poll: it only runs in response to a database change.
+     */
+    private val studyTickRunnable = Runnable {
+        try {
+            tickStudyProgress()
+        } catch (e: Throwable) {
+            Log.w(TAG, "study tick failed", e)
+            GateDiagnostics.recordError(this, "study: ${e.message}")
+        }
+    }
+
+    private fun scheduleStudyTick() {
+        handler.removeCallbacks(studyTickRunnable)
+        handler.postDelayed(studyTickRunnable, STUDY_TICK_DEBOUNCE_MS)
+    }
+
+    private val studySafetyTickRunnable = object : Runnable {
         override fun run() {
+            if (!studyTrackingActive) return
+            if (!AppMonitorService.hasDelegatedSession(prefs)) return
+            if (currentForegroundPackage != AppMonitorService.ANKIDROID_PACKAGE) return
             try {
                 tickStudyProgress()
             } catch (e: Throwable) {
-                Log.w(TAG, "study poll failed", e)
-                GateDiagnostics.recordError(this@AnkiBlockAccessibilityService, "study: ${e.message}")
+                Log.w(TAG, "study safety tick failed", e)
             }
-            if (studyTrackingActive) {
-                handler.postDelayed(this, AppMonitorService.STUDY_POLL_MS)
-            }
+            handler.postDelayed(this, STUDY_SAFETY_TICK_MS)
         }
+    }
+
+    private fun armStudySafetyTick() {
+        handler.removeCallbacks(studySafetyTickRunnable)
+        if (studyTrackingActive &&
+            AppMonitorService.hasDelegatedSession(prefs) &&
+            currentForegroundPackage == AppMonitorService.ANKIDROID_PACKAGE
+        ) {
+            handler.postDelayed(studySafetyTickRunnable, STUDY_SAFETY_TICK_MS)
+        }
+    }
+
+    private fun cancelStudySafetyTick() {
+        handler.removeCallbacks(studySafetyTickRunnable)
     }
 
     private val ankiContentObserver = object : ContentObserver(handler) {
@@ -81,11 +144,10 @@ class AnkiBlockAccessibilityService : AccessibilityService() {
 
         override fun onChange(selfChange: Boolean, uri: Uri?) {
             if (!studyTrackingActive) return
-            try {
-                tickStudyProgress()
-            } catch (e: Throwable) {
-                Log.w(TAG, "content observer tick failed", e)
-            }
+            // Fires for ContentProvider API writes. In-app Reviewer answers do
+            // NOT notify — those are covered by Anki accessibility events.
+            Log.d(TAG, "Anki content observer onChange uri=$uri")
+            scheduleStudyTick()
         }
     }
 
@@ -104,6 +166,14 @@ class AnkiBlockAccessibilityService : AccessibilityService() {
         repairPassiveMergeState()
         ensureStudyDayRollover()
         GateDiagnostics.recordMonitorRestart(this)
+        UnlockNotificationManager.ensureChannels(this)
+        UnlockNotificationManager.sync(this)
+        // Re-arm expiry + notifs after a service/process restart mid-unlock.
+        val remaining = AppMonitorService.unlockRemainingMs(prefs)
+        if (remaining > 0L) {
+            scheduleUnlockExpiryCheck(remaining)
+            Log.i(TAG, "re-armed unlock expiry (${remaining}ms left)")
+        }
         Log.i(TAG, "AccessibilityService connected")
         if (AppMonitorService.hasDelegatedSession(prefs) ||
             currentForegroundPackage == AppMonitorService.ANKIDROID_PACKAGE
@@ -149,9 +219,16 @@ class AnkiBlockAccessibilityService : AccessibilityService() {
         if (previous != pkg) {
             cancelUnlockExpiryCheck()
             cancelUrlCheck()
-            // User moved to a different app: the gate for the previous one is moot.
+            // Never tear the gate down immediately on a package change: the next
+            // event is often launcher/recents (or another blocked app). Immediate
+            // dismiss → blank frame → re-show = flicker. Swap in place for the
+            // next blocked app; debounce-dismiss only when we truly left.
             if (gateOverlay.isShowing && !gateOverlay.isShowingFor(pkg)) {
-                gateOverlay.dismiss()
+                if (willHandleGateFor(pkg)) {
+                    cancelDeferredGateDismiss()
+                } else {
+                    scheduleDeferredGateDismiss()
+                }
             }
         }
 
@@ -164,9 +241,19 @@ class AnkiBlockAccessibilityService : AccessibilityService() {
             AppMonitorService.hasDelegatedSession(prefs)
         ) {
             ensureStudyTrackingActive()
+            // AnkiDroid's Reviewer writes the collection DB directly and does
+            // not call ContentResolver.notifyChange. Each card flip / ease
+            // button emits WINDOW_CONTENT_CHANGED — that is our review signal.
+            if (pkg == AppMonitorService.ANKIDROID_PACKAGE) {
+                scheduleStudyTick()
+                armStudySafetyTick()
+            } else {
+                cancelStudySafetyTick()
+            }
         } else if (studyTrackingActive && previous == AppMonitorService.ANKIDROID_PACKAGE) {
             // Left Anki — one more progress check, then tear down tracking soon.
-            tickStudyProgress()
+            cancelStudySafetyTick()
+            scheduleStudyTick()
             maybeStopStudyTracking()
         }
 
@@ -195,6 +282,8 @@ class AnkiBlockAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         cancelUnlockExpiryCheck()
         cancelUrlCheck()
+        cancelDeferredGateDismiss()
+        UnlockNotificationManager.clear(this)
         stopStudyTracking()
         overlayManager.dismiss()
         gateOverlay.dismiss()
@@ -222,17 +311,74 @@ class AnkiBlockAccessibilityService : AccessibilityService() {
     fun onTemporaryUnlock() {
         val remaining = AppMonitorService.unlockRemainingMs(prefs)
         if (remaining > 0L) {
-            handler.post { scheduleUnlockExpiryCheck(remaining) }
+            handler.post {
+                scheduleUnlockExpiryCheck(remaining)
+                UnlockNotificationManager.sync(this)
+            }
+        } else {
+            UnlockNotificationManager.clear(this)
         }
+    }
+
+    /**
+     * Unlock window ended via AlarmManager backup (process death) or an
+     * explicit expiry. Re-gate whatever blocked app/site is foreground.
+     */
+    fun onUnlockWindowExpired() {
+        handler.post {
+            cancelUnlockExpiryCheck()
+            UnlockNotificationManager.clear(this)
+            UnlockNotificationManager.clearProgress(this)
+            val pkg = currentForegroundPackage ?: return@post
+            if (!AppMonitorService.isBlockingEnabled(this) || isBlockingGoalComplete()) {
+                return@post
+            }
+            if (BrowserUrlDetector.isSupportedBrowser(pkg) &&
+                AppMonitorService.hasWebsiteRules(prefs)
+            ) {
+                scheduleUrlCheck(pkg)
+                return@post
+            }
+            if (shouldGateUnsupportedBrowser(pkg)) {
+                checkUnsupportedBrowserGate(pkg)
+                return@post
+            }
+            if (isBlockedPackage(pkg)) {
+                showGate(pkg, lookupDisplayName(pkg) ?: pkg, website = false)
+            }
+        }
+    }
+
+    /**
+     * The gate just launched AnkiDroid for [pkg]. Suppress re-gating that
+     * package for a short window so lingering window events from the blocked
+     * app (which is still foreground until AnkiDroid takes over) don't bounce
+     * the user straight back to the gate.
+     */
+    fun noteStudyLaunch(pkg: String) {
+        studyLaunchGracePkg = pkg
+        studyLaunchGraceUntilMs = System.currentTimeMillis() + STUDY_LAUNCH_GRACE_MS
+    }
+
+    private fun inStudyLaunchGrace(pkg: String): Boolean {
+        if (pkg != studyLaunchGracePkg) return false
+        if (System.currentTimeMillis() >= studyLaunchGraceUntilMs) {
+            studyLaunchGracePkg = null
+            return false
+        }
+        return true
     }
 
     fun ensureStudyTrackingActive() {
         if (studyTrackingActive) return
         studyTrackingActive = true
         registerAnkiObserver()
-        handler.removeCallbacks(studyPollRunnable)
-        handler.post(studyPollRunnable)
-        Log.i(TAG, "study tracking started")
+        // One immediate check to seed trackers and post initial progress; further
+        // updates come from Anki UI events / ContentObserver, with a slow safety
+        // tick while a delegated session is active in Anki.
+        scheduleStudyTick()
+        armStudySafetyTick()
+        Log.i(TAG, "study tracking started (event-driven)")
     }
 
     private fun maybeStopStudyTracking() {
@@ -251,7 +397,8 @@ class AnkiBlockAccessibilityService : AccessibilityService() {
     private fun stopStudyTracking() {
         if (!studyTrackingActive) return
         studyTrackingActive = false
-        handler.removeCallbacks(studyPollRunnable)
+        handler.removeCallbacks(studyTickRunnable)
+        cancelStudySafetyTick()
         unregisterAnkiObserver()
         if (lastPassiveWatching) {
             consolidatePassiveTrackers()
@@ -274,8 +421,10 @@ class AnkiBlockAccessibilityService : AccessibilityService() {
                 ankiContentObserver,
             )
             contentObserverRegistered = true
+            Log.i(TAG, "AnkiDroid content observer registered")
         } catch (e: Throwable) {
-            Log.w(TAG, "registerContentObserver failed — poll fallback only", e)
+            Log.e(TAG, "registerContentObserver failed — study progress won't update", e)
+            GateDiagnostics.recordError(this, "observer register: ${e.message}")
         }
     }
 
@@ -361,11 +510,16 @@ class AnkiBlockAccessibilityService : AccessibilityService() {
         keyTrackers.clear()
         lastReportedProgress = -1
         delegatedCompleteStreak = 0
+        delegatedTrackersLoaded = true // fresh session: nothing to reload
     }
 
     fun onDelegatedSessionEnded() {
         lastReportedProgress = -1
         delegatedCompleteStreak = 0
+        delegatedTrackersLoaded = false
+        // Progress notif is tied to an in-flight session; the unlock timer notif
+        // (separate id) takes over when the goal is actually reached.
+        UnlockNotificationManager.clearProgress(this)
         if (currentForegroundPackage != AppMonitorService.ANKIDROID_PACKAGE) {
             stopStudyTracking()
         }
@@ -383,6 +537,10 @@ class AnkiBlockAccessibilityService : AccessibilityService() {
                 "packageName" to pkg,
             ),
         )
+        // Silent, ongoing "N / target · keep going" while studying toward unlock.
+        if (completed < target) {
+            UnlockNotificationManager.postProgress(this, completed, target)
+        }
     }
 
     private fun checkPassiveStudy(foreground: String?) {
@@ -617,6 +775,19 @@ class AnkiBlockAccessibilityService : AccessibilityService() {
 
         val inAnki = activePkg == AppMonitorService.ANKIDROID_PACKAGE
 
+        // Restore per-card trackers after a service/process kill so already-
+        // credited reviews survive (otherwise progress stalls at the last
+        // persisted count until the user re-reviews past it).
+        if (!delegatedTrackersLoaded) {
+            if (keyTrackers.isEmpty()) {
+                api.deserializeTrackers(
+                    prefs.getString(AppMonitorService.KEY_DELEGATED_TRACKERS, null),
+                    keyTrackers,
+                )
+            }
+            delegatedTrackersLoaded = true
+        }
+
         ensureMultiDeckSnapshot(
             api,
             deckIds,
@@ -662,7 +833,22 @@ class AnkiBlockAccessibilityService : AccessibilityService() {
                 .putInt(AppMonitorService.KEY_DELEGATED_LAST_REPS, repsBased)
                 .commit()
         }
+        // Persist trackers (baselines + credited) so counting survives a kill.
+        prefs.edit()
+            .putString(
+                AppMonitorService.KEY_DELEGATED_TRACKERS,
+                api.serializeTrackers(keyTrackers),
+            )
+            .apply()
         val completed = (seeded + effectiveReps).coerceAtMost(target)
+
+        if (repsBased > prevReps || completed != lastReportedProgress) {
+            Log.i(
+                TAG,
+                "delegated progress reps=$repsBased (was $prevReps) " +
+                    "completed=$completed/$target inAnki=$inAnki keys=${initialKeys.size}",
+            )
+        }
 
         if (completed >= target) {
             delegatedCompleteStreak += 1
@@ -754,6 +940,9 @@ class AnkiBlockAccessibilityService : AccessibilityService() {
 
         if (!isBlockedPackage(pkg)) return
 
+        // Just tapped Study for this app: AnkiDroid is on its way to the front.
+        if (inStudyLaunchGrace(pkg)) return
+
         if (isBlockingGoalComplete()) return
         val remaining = AppMonitorService.unlockRemainingMs(prefs)
         if (remaining > 0L) {
@@ -786,6 +975,7 @@ class AnkiBlockAccessibilityService : AccessibilityService() {
     private fun checkUnsupportedBrowserGate(pkg: String) {
         if (gateOverlay.isShowingFor(pkg)) return
         if (!AppMonitorService.isBlockingEnabled(this)) return
+        if (inStudyLaunchGrace(pkg)) return
         if (isBlockingGoalComplete()) return
         val remaining = AppMonitorService.unlockRemainingMs(prefs)
         if (remaining > 0L) {
@@ -856,6 +1046,7 @@ class AnkiBlockAccessibilityService : AccessibilityService() {
             }
             return
         }
+        if (inStudyLaunchGrace(pkg)) return
         if (isBlockingGoalComplete()) return
         val remaining = AppMonitorService.unlockRemainingMs(prefs)
         if (remaining > 0L) {
@@ -866,7 +1057,9 @@ class AnkiBlockAccessibilityService : AccessibilityService() {
         val browserName = lookupInstalledAppName(pkg) ?: pkg
         val displayName = "${matched.label.ifBlank { host }} · $browserName"
         if (gateOverlay.isShowingFor(pkg) && gateOverlay.isWebsiteGate) {
-            // Already covering this browser; refresh label if host changed.
+            // Same browser still on a blocked site — refresh the label if the
+            // host/path changed (e.g. youtube.com → youtube.com/shorts).
+            gateOverlay.updateTitle(displayName)
             return
         }
         if (AppMonitorService.tryUnlockFromRecentBout(
@@ -888,15 +1081,18 @@ class AnkiBlockAccessibilityService : AccessibilityService() {
      */
     private fun scheduleUnlockExpiryCheck(delayMs: Long) {
         cancelUnlockExpiryCheck()
+        UnlockNotificationManager.sync(this)
         val r = Runnable {
             scheduledExpireRunnable = null
             val pkg = currentForegroundPackage ?: return@Runnable
             if (AppMonitorService.isUnlocked(prefs)) {
                 // Window was extended after we were scheduled.
                 scheduleUnlockExpiryCheck(AppMonitorService.unlockRemainingMs(prefs))
+                UnlockNotificationManager.sync(this@AnkiBlockAccessibilityService)
                 return@Runnable
             }
             prefs.edit().remove(AppMonitorService.KEY_UNLOCK_UNTIL).apply()
+            UnlockNotificationManager.clear(this@AnkiBlockAccessibilityService)
             if (!AppMonitorService.isBlockingEnabled(this) || isBlockingGoalComplete()) {
                 return@Runnable
             }
@@ -950,7 +1146,45 @@ class AnkiBlockAccessibilityService : AccessibilityService() {
         }
     }
 
+    private fun willHandleGateFor(pkg: String): Boolean {
+        if (isBlockedPackage(pkg)) return true
+        if (shouldGateUnsupportedBrowser(pkg)) return true
+        if (BrowserUrlDetector.isSupportedBrowser(pkg) &&
+            AppMonitorService.hasWebsiteRules(prefs)
+        ) {
+            return true
+        }
+        return false
+    }
+
+    private fun scheduleDeferredGateDismiss() {
+        cancelDeferredGateDismiss()
+        val r = Runnable {
+            deferredGateDismissRunnable = null
+            if (!gateOverlay.isShowing) return@Runnable
+            val pkg = currentForegroundPackage
+            if (pkg != null && willHandleGateFor(pkg)) return@Runnable
+            // Still on a browser with a website gate — URL check owns dismiss.
+            if (pkg != null &&
+                gateOverlay.isWebsiteGate &&
+                BrowserUrlDetector.isSupportedBrowser(pkg)
+            ) {
+                return@Runnable
+            }
+            Log.d(TAG, "deferred gate dismiss (foreground=$pkg)")
+            gateOverlay.dismiss()
+        }
+        deferredGateDismissRunnable = r
+        handler.postDelayed(r, GATE_DISMISS_DEBOUNCE_MS)
+    }
+
+    private fun cancelDeferredGateDismiss() {
+        deferredGateDismissRunnable?.let { handler.removeCallbacks(it) }
+        deferredGateDismissRunnable = null
+    }
+
     private fun showGate(pkg: String, displayName: String, website: Boolean = false) {
+        cancelDeferredGateDismiss()
         Log.i(TAG, "showGate $displayName ($pkg) website=$website")
         gateOverlay.show(pkg, displayName, website)
     }

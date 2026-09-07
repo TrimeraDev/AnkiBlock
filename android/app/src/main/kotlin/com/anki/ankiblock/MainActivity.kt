@@ -215,6 +215,48 @@ class MainActivity : FlutterActivity() {
                 "getProtectionStatus" -> {
                     result.success(ProtectionStatus.snapshot(this))
                 }
+                "hasNotificationPermission" -> {
+                    result.success(UnlockNotificationManager.canPost(this))
+                }
+                "requestNotificationPermission" -> {
+                    UnlockNotificationManager.ensureChannels(this)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                        !UnlockNotificationManager.canPost(this)
+                    ) {
+                        androidx.core.app.ActivityCompat.requestPermissions(
+                            this,
+                            arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
+                            7103,
+                        )
+                    } else if (!UnlockNotificationManager.canPost(this)) {
+                        // Permission granted but notifications disabled in system settings.
+                        try {
+                            val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                            }
+                            startActivity(intent)
+                        } catch (_: Throwable) {
+                        }
+                    }
+                    // If already unlocked, refresh the timer immediately after grant.
+                    UnlockNotificationManager.sync(this)
+                    result.success(UnlockNotificationManager.canPost(this))
+                }
+                "getUnlockNotificationSettings" -> {
+                    result.success(AppMonitorService.unlockNotificationSettings(this))
+                }
+                "setUnlockNotificationSettings" -> {
+                    val timer = call.argument<Boolean>("timerEnabled") ?: true
+                    val warning = call.argument<Boolean>("warningEnabled") ?: true
+                    val progress = call.argument<Boolean>("progressEnabled") ?: true
+                    AppMonitorService.setUnlockNotificationSettings(
+                        this,
+                        timer,
+                        warning,
+                        progress,
+                    )
+                    result.success(true)
+                }
                 "isIgnoringBatteryOptimizations" -> {
                     result.success(ProtectionStatus.isIgnoringBatteryOptimizations(this))
                 }

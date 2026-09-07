@@ -16,6 +16,7 @@ import android.view.animation.LinearInterpolator
 import android.widget.Button
 import android.widget.ProgressBar
 import android.widget.TextView
+import android.util.DisplayMetrics
 import java.util.concurrent.Executors
 
 /**
@@ -61,6 +62,14 @@ class GateOverlayManager(
 
     fun show(pkg: String, appName: String, website: Boolean = false) {
         mainHandler.post { showInternal(pkg, appName, website) }
+    }
+
+    /** Update the gate title while it's already showing (website host change). */
+    fun updateTitle(appName: String) {
+        mainHandler.post {
+            val root = view ?: return@post
+            root.findViewById<TextView>(R.id.gate_app_name).text = appName
+        }
     }
 
     fun dismiss() {
@@ -204,8 +213,43 @@ class GateOverlayManager(
     }
 
     private fun showInternal(pkg: String, appName: String, website: Boolean) {
-        if (isShowingFor(pkg) && isWebsiteGate == website) return
-        dismissInternal()
+        // Already covering this exact target — keep the overlay, refresh title.
+        if (isShowingFor(pkg) && isWebsiteGate == website) {
+            view?.findViewById<TextView>(R.id.gate_app_name)?.text = appName
+            return
+        }
+
+        // Gate already up for a different app/site: swap content in place so we
+        // never removeView→blank frame→addView (the blocked→blocked flicker).
+        val existing = view
+        if (existing != null) {
+            cancelBypassHold()
+            val token = ++showToken
+            packageName = pkg
+            isWebsiteGate = website
+            val quick = buildModel(pkg, withAnki = false)
+            render(existing, appName, quick)
+            wireActions(existing, pkg, appName, quick, website)
+            existing.requestFocus()
+            GateDiagnostics.recordGateShown(service)
+            GateStats.recordBlockedAttempt(service)
+            Log.i(TAG, "gate swapped to $appName ($pkg) website=$website")
+            io.execute {
+                val full = try {
+                    buildModel(pkg, withAnki = true)
+                } catch (e: Throwable) {
+                    Log.w(TAG, "gate anki refresh failed", e)
+                    return@execute
+                }
+                mainHandler.post {
+                    if (token != showToken || view !== existing) return@post
+                    render(existing, appName, full)
+                    wireActions(existing, pkg, appName, full, website)
+                }
+            }
+            return
+        }
+
         val token = ++showToken
         packageName = pkg
         isWebsiteGate = website
@@ -216,13 +260,22 @@ class GateOverlayManager(
         render(root, appName, quick)
         wireActions(root, pkg, appName, quick, website)
 
+        // Leave the status-bar strip uncovered so a swipe from the top can open
+        // the notification shade (full-screen TYPE_ACCESSIBILITY_OVERLAY would
+        // otherwise eat that gesture).
+        val statusBarHeight = statusBarHeightPx()
+        val screenH = screenHeightPx()
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.MATCH_PARENT,
+            (screenH - statusBarHeight).coerceAtLeast(1),
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT,
-        ).apply { gravity = Gravity.TOP or Gravity.START }
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            y = statusBarHeight
+        }
 
         try {
             windowManager.addView(root, params)
@@ -356,6 +409,8 @@ class GateOverlayManager(
                     // is shown by tryUnlockFromRecentBout.
                     return@post
                 }
+                // Guard against the blocked app re-gating before AnkiDroid fronts.
+                service.noteStudyLaunch(pkg)
                 ankiApi.openReviewer(launchDeck)
             }
         }
@@ -441,6 +496,30 @@ class GateOverlayManager(
             service.startActivity(launch)
         } catch (e: Throwable) {
             Log.w(TAG, "launch $pkg failed", e)
+        }
+    }
+
+    private fun statusBarHeightPx(): Int {
+        val resId = service.resources.getIdentifier("status_bar_height", "dimen", "android")
+        if (resId > 0) {
+            return service.resources.getDimensionPixelSize(resId)
+        }
+        return (24 * service.resources.displayMetrics.density).toInt()
+    }
+
+    private fun screenHeightPx(): Int {
+        return try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                val bounds = windowManager.currentWindowMetrics.bounds
+                bounds.height()
+            } else {
+                val metrics = DisplayMetrics()
+                @Suppress("DEPRECATION")
+                windowManager.defaultDisplay.getRealMetrics(metrics)
+                metrics.heightPixels
+            }
+        } catch (_: Throwable) {
+            service.resources.displayMetrics.heightPixels
         }
     }
 }

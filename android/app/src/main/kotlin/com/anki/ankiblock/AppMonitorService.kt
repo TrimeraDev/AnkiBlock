@@ -24,6 +24,8 @@ object AppMonitorService {
     const val KEY_DELEGATED_TARGET = "delegated_target"
     const val KEY_DELEGATED_BASELINE = "delegated_baseline"
     const val KEY_DELEGATED_CARD_KEYS = "delegated_card_keys"
+    /** Serialized per-card review trackers so counting survives process kills. */
+    const val KEY_DELEGATED_TRACKERS = "delegated_trackers"
     const val KEY_DELEGATED_COMPLETE_STREAK = "delegated_complete_streak"
     const val KEY_DELEGATED_STARTED_AT = "delegated_started_at"
     const val KEY_DELEGATED_SEEDED = "delegated_seeded_completed"
@@ -70,7 +72,6 @@ object AppMonitorService {
     var lastEventMs: Long = 0L
 
     const val ANKIDROID_PACKAGE = "com.ichi2.anki"
-    const val STUDY_POLL_MS = 1_000L
 
     const val KEY_UNLOCK_DURATION_MS = "unlock_duration_ms"
     const val KEY_BYPASS_SECONDS = "bypass_seconds"
@@ -86,6 +87,12 @@ object AppMonitorService {
 
     /** Single global window: an earned unlock or bypass opens every blocked app. */
     const val KEY_UNLOCK_UNTIL = "unlock_until"
+    /** Silent shade timer while unlocked. */
+    const val KEY_UNLOCK_TIMER_NOTIF = "unlock_timer_notif"
+    /** Silent shade progress while studying toward an unlock. */
+    const val KEY_PROGRESS_NOTIF = "progress_notif"
+    /** Heads-up ~60s before unlock ends. */
+    const val KEY_UNLOCK_WARNING_NOTIF = "unlock_warning_notif"
 
     fun setBlockedPackages(
         context: Context,
@@ -172,12 +179,14 @@ object AppMonitorService {
     fun grantTempUnlock(context: Context) {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         grantUnlockFor(prefs, prefs.getLong(KEY_UNLOCK_DURATION_MS, DEFAULT_UNLOCK_DURATION_MS))
+        UnlockNotificationManager.sync(context)
     }
 
     /** Emergency bypass: short global unlock (native gate hold action). */
     fun grantBypass(context: Context) {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         grantUnlockFor(prefs, prefs.getInt(KEY_BYPASS_SECONDS, DEFAULT_BYPASS_SECONDS) * 1000L)
+        UnlockNotificationManager.sync(context)
     }
 
     private fun grantUnlockFor(prefs: SharedPreferences, durationMs: Long) {
@@ -187,6 +196,33 @@ object AppMonitorService {
         // commit() so an immediate app (re)launch cannot race ahead of the unlock.
         prefs.edit().putLong(KEY_UNLOCK_UNTIL, until).commit()
         Log.i(TAG, "unlock until=$until (${durationMs / 1000}s)")
+    }
+
+    fun setUnlockNotificationSettings(
+        context: Context,
+        timerEnabled: Boolean,
+        warningEnabled: Boolean,
+        progressEnabled: Boolean = true,
+    ) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_UNLOCK_TIMER_NOTIF, timerEnabled)
+            .putBoolean(KEY_UNLOCK_WARNING_NOTIF, warningEnabled)
+            .putBoolean(KEY_PROGRESS_NOTIF, progressEnabled)
+            .apply()
+        UnlockNotificationManager.sync(context)
+        if (!progressEnabled) {
+            UnlockNotificationManager.clearProgress(context)
+        }
+    }
+
+    fun unlockNotificationSettings(context: Context): Map<String, Any> {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return mapOf(
+            "timerEnabled" to prefs.getBoolean(KEY_UNLOCK_TIMER_NOTIF, true),
+            "warningEnabled" to prefs.getBoolean(KEY_UNLOCK_WARNING_NOTIF, true),
+            "progressEnabled" to prefs.getBoolean(KEY_PROGRESS_NOTIF, true),
+            "canPost" to UnlockNotificationManager.canPost(context),
+        )
     }
 
     /** Milliseconds left in the current unlock window, 0 when locked. */
@@ -204,10 +240,20 @@ object AppMonitorService {
         cardsReviewed: Int,
     ) {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val storedDay = prefs.getString(KEY_STUDY_DAY, null)
+        val nativeReviewed = prefs.getInt(KEY_DAILY_REVIEWED, 0)
+        // Never let Flutter overwrite a higher native count for the same study
+        // day (native credits reviews while Flutter may still hold a stale
+        // mirror). Different day → trust the Flutter push (day rollover).
+        val mergedReviewed = if (storedDay == studyDayKey) {
+            maxOf(nativeReviewed, cardsReviewed.coerceAtLeast(0))
+        } else {
+            cardsReviewed.coerceAtLeast(0)
+        }
         val editor = prefs.edit()
             .putString(KEY_STUDY_DAY, studyDayKey)
             .putInt(KEY_DAILY_GOAL, dailyGoal)
-            .putInt(KEY_DAILY_REVIEWED, cardsReviewed)
+            .putInt(KEY_DAILY_REVIEWED, mergedReviewed)
         // Only advance the passive merge watermark — never reset it to the
         // full daily total (that blocked organic study after gate sessions).
         val passiveMerged = prefs.getInt(KEY_PASSIVE_APPLIED_TO_DAILY, 0)
@@ -407,6 +453,7 @@ object AppMonitorService {
                 )
                 engine?.onDelegatedSessionSeeded(existingCompleted)
                 engine?.ensureStudyTrackingActive()
+                UnlockNotificationManager.postProgress(context, existingCompleted, safeTarget)
                 return mapOf(
                     "unlocked" to false,
                     "seeded" to existingCompleted,
@@ -432,10 +479,12 @@ object AppMonitorService {
             .putLong(KEY_DELEGATED_STARTED_AT, System.currentTimeMillis())
             .remove(KEY_DELEGATED_CARD_KEYS)
             .remove(KEY_DELEGATED_BASELINE)
+            .remove(KEY_DELEGATED_TRACKERS)
             .commit()
 
         engine?.onDelegatedSessionSeeded(seed)
         engine?.ensureStudyTrackingActive()
+        UnlockNotificationManager.postProgress(context, seed, safeTarget)
         Log.i(TAG, "delegated start pkg=$packageName seed=$seed target=$safeTarget")
         return mapOf(
             "unlocked" to false,
@@ -458,6 +507,7 @@ object AppMonitorService {
             .remove(KEY_DELEGATED_STARTED_AT)
             .remove(KEY_DELEGATED_SEEDED)
             .remove(KEY_DELEGATED_LAST_REPS)
+            .remove(KEY_DELEGATED_TRACKERS)
             .apply()
         engine?.onDelegatedSessionEnded()
     }

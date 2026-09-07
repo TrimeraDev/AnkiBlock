@@ -278,6 +278,39 @@ class AppsService {
     });
   }
 
+  Future<({bool timerEnabled, bool warningEnabled, bool progressEnabled, bool canPost})>
+      getUnlockNotificationSettings() async {
+    if (!Platform.isAndroid) {
+      return (
+        timerEnabled: true,
+        warningEnabled: true,
+        progressEnabled: true,
+        canPost: true,
+      );
+    }
+    final raw = await _channel
+        .invokeMethod<Map<dynamic, dynamic>>('getUnlockNotificationSettings');
+    return (
+      timerEnabled: raw?['timerEnabled'] == true,
+      warningEnabled: raw?['warningEnabled'] == true,
+      progressEnabled: raw?['progressEnabled'] != false,
+      canPost: raw?['canPost'] == true,
+    );
+  }
+
+  Future<void> setUnlockNotificationSettings({
+    required bool timerEnabled,
+    required bool warningEnabled,
+    required bool progressEnabled,
+  }) async {
+    if (!Platform.isAndroid) return;
+    await _channel.invokeMethod('setUnlockNotificationSettings', {
+      'timerEnabled': timerEnabled,
+      'warningEnabled': warningEnabled,
+      'progressEnabled': progressEnabled,
+    });
+  }
+
   Future<BrowserCompatibility> getBrowserCompatibility() async {
     if (!Platform.isAndroid) return BrowserCompatibility.empty;
     final raw = await _channel.invokeMethod<Map<dynamic, dynamic>>(

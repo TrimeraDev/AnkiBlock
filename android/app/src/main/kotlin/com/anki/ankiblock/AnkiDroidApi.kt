@@ -298,6 +298,41 @@ class AnkiDroidApi(private val context: Context) {
 
     fun cardKey(noteId: Long, cardOrd: Int): String = "$noteId:$cardOrd"
 
+    /**
+     * Serialize review trackers so counting survives a service/process kill
+     * mid-session. Entries are `|`-separated; fields within an entry `;`-
+     * separated (card keys use `:` only, so both delimiters are safe).
+     */
+    fun serializeTrackers(trackers: Map<String, KeyTracker>): String {
+        val sb = StringBuilder()
+        for ((key, t) in trackers) {
+            if (sb.isNotEmpty()) sb.append('|')
+            sb.append(key).append(';')
+                .append(t.lastReps).append(';')
+                .append(t.lastLapses).append(';')
+                .append(t.lastDue).append(';')
+                .append(t.lastType).append(';')
+                .append(t.credited)
+        }
+        return sb.toString()
+    }
+
+    fun deserializeTrackers(raw: String?, into: MutableMap<String, KeyTracker>) {
+        if (raw.isNullOrBlank()) return
+        for (entry in raw.split('|')) {
+            if (entry.isBlank()) continue
+            val f = entry.split(';')
+            if (f.size < 6) continue
+            into[f[0]] = KeyTracker(
+                lastReps = f[1].toIntOrNull() ?: 0,
+                lastLapses = f[2].toIntOrNull() ?: 0,
+                lastDue = f[3].toLongOrNull() ?: 0L,
+                lastType = f[4].toIntOrNull() ?: CARD_TYPE_NEW,
+                credited = f[5].toIntOrNull() ?: 0,
+            )
+        }
+    }
+
     private val cardStatsProjection = arrayOf(
         CARD_ID,
         NOTE_ID,

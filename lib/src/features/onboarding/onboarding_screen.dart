@@ -541,7 +541,9 @@ class _BlockingPermissionsPage extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'Usage access powers screen-time stats. Battery exemption helps on aggressive OEMs.',
+            'Blocking only needs Accessibility. Usage access is optional — it '
+            'powers screen-time stats when picking apps. Battery exemption helps '
+            'Accessibility stay alive on aggressive OEMs.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: AppTheme.onSurfaceVariant,
                 ),

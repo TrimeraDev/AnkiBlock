@@ -165,8 +165,18 @@ class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
     await _mergeFromNative();
     await syncDailyGoalToNative(ref);
 
+    unawaited(_ensureNotificationPermission());
     unawaited(_syncNativeWhenAnkiReady());
     unawaited(ref.read(installedAppsProvider.future));
+  }
+
+  /// Unlock timer/warning notifications default on, but the OS runtime
+  /// permission (Android 13+) is never granted until we ask. Prompt once on
+  /// startup when it's still missing so the notifications actually appear.
+  Future<void> _ensureNotificationPermission() async {
+    final perms = ref.read(permissionServiceProvider);
+    if (await perms.hasNotificationPermission()) return;
+    await perms.requestNotificationPermission();
   }
 
   Future<void> _settleStrictStudy() async {

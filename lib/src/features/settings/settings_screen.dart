@@ -195,6 +195,9 @@ class _SettingsBody extends ConsumerWidget {
           },
         ),
         const Divider(),
+        const _SectionHeader(label: 'Unlock notifications'),
+        const _UnlockNotificationSettings(),
+        const Divider(),
         const _SectionHeader(label: 'Emergency bypass'),
         SwitchListTile(
           secondary: const Icon(Icons.emergency_outlined),
@@ -401,6 +404,134 @@ class _SettingsBody extends ConsumerWidget {
     if (unlockDurationMinutes != null || isEnabled != null) {
       await syncBlockRuleToNative(ref);
     }
+  }
+}
+
+class _UnlockNotificationSettings extends ConsumerStatefulWidget {
+  const _UnlockNotificationSettings();
+
+  @override
+  ConsumerState<_UnlockNotificationSettings> createState() =>
+      _UnlockNotificationSettingsState();
+}
+
+class _UnlockNotificationSettingsState
+    extends ConsumerState<_UnlockNotificationSettings>
+    with WidgetsBindingObserver {
+  bool _timer = true;
+  bool _warning = true;
+  bool _progress = true;
+  bool _canPost = true;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _load();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _load();
+  }
+
+  Future<void> _load() async {
+    final s = await ref.read(appsServiceProvider).getUnlockNotificationSettings();
+    if (!mounted) return;
+    setState(() {
+      _timer = s.timerEnabled;
+      _warning = s.warningEnabled;
+      _progress = s.progressEnabled;
+      _canPost = s.canPost;
+      _loading = false;
+    });
+  }
+
+  Future<void> _save({bool? timer, bool? warning, bool? progress}) async {
+    final nextTimer = timer ?? _timer;
+    final nextWarning = warning ?? _warning;
+    final nextProgress = progress ?? _progress;
+    if ((nextTimer || nextWarning || nextProgress) && !_canPost) {
+      await ref.read(permissionServiceProvider).requestNotificationPermission();
+      await _load();
+    }
+    setState(() {
+      _timer = nextTimer;
+      _warning = nextWarning;
+      _progress = nextProgress;
+    });
+    await ref.read(appsServiceProvider).setUnlockNotificationSettings(
+          timerEnabled: nextTimer,
+          warningEnabled: nextWarning,
+          progressEnabled: nextProgress,
+        );
+    await _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const ListTile(
+        title: Text('Loading…'),
+        dense: true,
+      );
+    }
+    return Column(
+      children: [
+        if (!_canPost)
+          ListTile(
+            leading: const Icon(Icons.notifications_off_outlined),
+            title: const Text('Notifications permission'),
+            subtitle: const Text(
+              'Allow notifications so study progress and the unlock timer '
+              'can appear in the shade.',
+            ),
+            trailing: TextButton(
+              onPressed: () async {
+                await ref
+                    .read(permissionServiceProvider)
+                    .requestNotificationPermission();
+                await _load();
+              },
+              child: const Text('Allow'),
+            ),
+          ),
+        SwitchListTile(
+          secondary: const Icon(Icons.school_outlined),
+          title: const Text('Study progress'),
+          subtitle: const Text(
+            'Silent shade notification while working toward an unlock',
+          ),
+          value: _progress,
+          onChanged: (v) => _save(progress: v),
+        ),
+        SwitchListTile(
+          secondary: const Icon(Icons.timer_outlined),
+          title: const Text('Unlock timer'),
+          subtitle: const Text(
+            'Silent shade notification with time left while unlocked',
+          ),
+          value: _timer,
+          onChanged: (v) => _save(timer: v),
+        ),
+        SwitchListTile(
+          secondary: const Icon(Icons.notification_important_outlined),
+          title: const Text('1-minute warning'),
+          subtitle: const Text(
+            'Alert ~60 seconds before apps and sites lock again',
+          ),
+          value: _warning,
+          onChanged: (v) => _save(warning: v),
+        ),
+      ],
+    );
   }
 }
 

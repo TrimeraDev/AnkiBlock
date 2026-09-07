@@ -131,6 +131,24 @@ class PermissionService {
     } catch (_) {}
   }
 
+  Future<bool> hasNotificationPermission() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      final result =
+          await _channel.invokeMethod<bool>('hasNotificationPermission');
+      return result ?? true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  Future<void> requestNotificationPermission() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod('requestNotificationPermission');
+    } catch (_) {}
+  }
+
   Future<ProtectionStatus> getProtectionStatus() async {
     if (!Platform.isAndroid) {
       return const ProtectionStatus(

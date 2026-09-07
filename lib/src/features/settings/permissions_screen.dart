@@ -24,6 +24,7 @@ class _PermissionsScreenState extends ConsumerState<PermissionsScreen>
   bool _loading = true;
   bool _showDiagnostics = false;
   bool _copyFeedback = false;
+  bool _notificationsGranted = true;
 
   @override
   void initState() {
@@ -48,10 +49,12 @@ class _PermissionsScreenState extends ConsumerState<PermissionsScreen>
   Future<void> _refresh() async {
     final svc = ref.read(permissionServiceProvider);
     final status = await svc.getProtectionStatus();
+    final notifications = await svc.hasNotificationPermission();
     final inputs = await gatherDiagnosticsInputs(ref);
     if (!mounted) return;
     setState(() {
       _status = status;
+      _notificationsGranted = notifications;
       _diagnosticsReport = formatDiagnosticsReport(inputs);
       _loading = false;
     });
@@ -131,9 +134,22 @@ class _PermissionsScreenState extends ConsumerState<PermissionsScreen>
                   icon: Icons.visibility_outlined,
                   title: 'Usage Access (optional)',
                   subtitle:
-                      'Used for screen-time stats on the Today and Blocking screens.',
+                      'Not required for blocking. Only powers screen-time stats '
+                      'when picking apps.',
                   granted: status.usage,
                   onRequest: svc.openUsageAccessSettings,
+                ),
+                _PermissionTile(
+                  icon: Icons.notifications_outlined,
+                  title: 'Notifications (optional)',
+                  subtitle:
+                      'Study progress and unlock timer in the shade, plus a '
+                      '1-minute warning before apps and sites lock again.',
+                  granted: _notificationsGranted,
+                  onRequest: () async {
+                    await svc.requestNotificationPermission();
+                    await _refresh();
+                  },
                 ),
                 _PermissionTile(
                   icon: Icons.battery_charging_full_outlined,
