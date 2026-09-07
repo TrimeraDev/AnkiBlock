@@ -71,6 +71,7 @@ Future<void> syncBlockRuleToNative(WidgetRef ref) async {
         studyMode: rule?.studyMode ?? 'cardCount',
         unlockGoal: rule?.cardsRequired ?? 10,
         bypassEnabled: rule?.bypassEnabled ?? true,
+        bypassDailyCap: rule?.bypassDailyCap ?? 3,
       );
 }
 
@@ -100,37 +101,45 @@ Future<void> syncStudyScopeToNative(WidgetRef ref) async {
   }
 }
 
-/// Pulls passive study counts from native when the user studied in AnkiDroid
-/// without opening AnkiBlock.
-Future<void> mergeDailyFromNative(WidgetRef ref) async {
+/// Pulls native-owned progress into Drift: cards studied in AnkiDroid while
+/// AnkiBlock was closed, plus the gate counters (attempts, bypasses, unlocks)
+/// that the native gate records without Flutter.
+///
+/// Returns the number of unlocks earned since the last merge (0 if none).
+Future<int> mergeDailyFromNative(WidgetRef ref) async {
   final native = await ref.read(appsServiceProvider).getDailyGoalState();
   final day = studyDayKey();
-  // After the 3am boundary native may still hold yesterday's key until Flutter
-  // syncs. Push Flutter's authoritative today count instead of skipping.
-  if (native.studyDayKey != day) {
-    await syncDailyGoalToNative(ref);
-    return;
-  }
   final db = ref.read(databaseProvider);
   final stat = await db.getDailyStat(day);
-  final dbCount = stat?.cardsReviewed ?? 0;
-  if (native.cardsReviewed > dbCount) {
+  var changed = false;
+
+  // After the 3am boundary native may still hold yesterday's key until Flutter
+  // syncs. Push Flutter's authoritative today count instead of pulling.
+  if (native.studyDayKey != day) {
+    await syncDailyGoalToNative(ref);
+  } else if (native.cardsReviewed > (stat?.cardsReviewed ?? 0)) {
     await db.setCardsReviewedForDay(day, native.cardsReviewed);
+    changed = true;
+  }
+
+  // Gate counters roll over natively on the same 3am boundary.
+  final dbUnlocks = stat?.unlocksEarned ?? 0;
+  final newUnlocks = (native.unlocksEarned - dbUnlocks).clamp(0, 1 << 30);
+  if (await db.mergeGateCountersForDay(
+    day,
+    blockedAttempts: native.blockedAttempts,
+    bypassesUsed: native.bypassesUsed,
+    unlocksEarned: native.unlocksEarned,
+  )) {
+    changed = true;
+  }
+
+  if (changed) {
     ref.invalidate(dailyStatsProvider(day));
     ref.invalidate(studyProgressProvider);
     await syncDailyGoalToNative(ref);
   }
-}
-
-Future<void> ensureAppMonitorRunning(WidgetRef ref) async {
-  final blocked =
-      await ref.read(databaseProvider).watchActiveBlockedApps().first;
-  final svc = ref.read(appsServiceProvider);
-  if (blocked.isNotEmpty) {
-    await svc.startAppMonitor();
-  } else {
-    await svc.stopAppMonitor();
-  }
+  return newUnlocks;
 }
 
 Future<void> toggleAppBlocked(
@@ -191,5 +200,4 @@ Future<void> syncBlockedPackagesToNative(WidgetRef ref) async {
   await svc.setBlockedPackages(active);
   await syncStudyScopeToNative(ref);
   await syncBlockRuleToNative(ref);
-  await ensureAppMonitorRunning(ref);
 }

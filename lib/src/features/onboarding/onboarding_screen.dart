@@ -15,6 +15,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/utils/blocking_goal.dart';
 import '../../core/widgets/brand_widgets.dart';
 import '../../core/widgets/setup_panels.dart';
+import '../../core/widgets/accessibility_disclosure.dart';
 
 class OnboardingScreen extends ConsumerStatefulWidget {
   const OnboardingScreen({super.key});
@@ -36,8 +37,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
 
   bool _ankiInstalled = false;
   bool _ankiPermission = false;
+  bool _hasAccessibility = false;
   bool _hasUsage = false;
-  bool _hasOverlay = false;
   bool _hasBattery = false;
   bool _autoSelectedDueDecks = false;
   bool _appliedDefaults = false;
@@ -70,15 +71,15 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
     final anki = ref.read(ankiDroidServiceProvider);
     final hadUsage = _hasUsage;
     final hadAnkiReady = _ankiInstalled && _ankiPermission;
+    final accessibility = await perm.hasAccessibilityPermission();
     final usage = await perm.hasUsageAccessPermission();
-    final overlay = await perm.hasOverlayPermission();
     final battery = await perm.isIgnoringBatteryOptimizations();
     final ankiStatus = await anki.getStatus();
     if (!mounted) return;
     final ankiReady = ankiStatus.installed && ankiStatus.permissionGranted;
     setState(() {
+      _hasAccessibility = accessibility;
       _hasUsage = usage;
-      _hasOverlay = overlay;
       _hasBattery = battery;
       _ankiInstalled = ankiStatus.installed;
       _ankiPermission = ankiStatus.permissionGranted;
@@ -160,12 +161,10 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
   }
 
   void _next() {
-    // Battery exemption is required for overnight reliability on aggressive OEMs.
-    if (_page == _permsPage &&
-        (!_hasUsage || !_hasOverlay || !_hasBattery)) {
+    // Accessibility is required for blocking; battery helps OEM survival.
+    if (_page == _permsPage && (!_hasAccessibility || !_hasBattery)) {
       final missing = <String>[
-        if (!_hasUsage) 'Usage access',
-        if (!_hasOverlay) 'Display over apps',
+        if (!_hasAccessibility) 'Accessibility',
         if (!_hasBattery) 'Unrestricted battery',
       ].join(', ');
       ScaffoldMessenger.of(context).showSnackBar(
@@ -259,15 +258,18 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
                     ),
                   ),
                   _BlockingPermissionsPage(
+                    hasAccessibility: _hasAccessibility,
                     hasUsage: _hasUsage,
-                    hasOverlay: _hasOverlay,
                     hasBattery: _hasBattery,
-                    onOpenUsage: () async {
-                      await perm.openUsageAccessSettings();
+                    onOpenAccessibility: () async {
+                      final ok =
+                          await showAccessibilityDisclosureDialog(context);
+                      if (!ok || !mounted) return;
+                      await perm.openAccessibilitySettings();
                       await _refresh();
                     },
-                    onOpenOverlay: () async {
-                      await perm.openOverlaySettings();
+                    onOpenUsage: () async {
+                      await perm.openUsageAccessSettings();
                       await _refresh();
                     },
                     onRequestBattery: () async {
@@ -483,19 +485,19 @@ class _AnkiConnectPage extends StatelessWidget {
 }
 
 class _BlockingPermissionsPage extends StatelessWidget {
+  final bool hasAccessibility;
   final bool hasUsage;
-  final bool hasOverlay;
   final bool hasBattery;
+  final Future<void> Function() onOpenAccessibility;
   final Future<void> Function() onOpenUsage;
-  final Future<void> Function() onOpenOverlay;
   final Future<void> Function() onRequestBattery;
 
   const _BlockingPermissionsPage({
+    required this.hasAccessibility,
     required this.hasUsage,
-    required this.hasOverlay,
     required this.hasBattery,
+    required this.onOpenAccessibility,
     required this.onOpenUsage,
-    required this.onOpenOverlay,
     required this.onRequestBattery,
   });
 
@@ -512,38 +514,38 @@ class _BlockingPermissionsPage extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'Needed to catch apps and show the study gate.',
+            'Accessibility detects blocked apps instantly and shows the study gate.',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: AppTheme.onSurfaceVariant,
                 ),
           ),
           const SizedBox(height: 24),
           _PermissionRow(
+            icon: Icons.accessibility_new_outlined,
+            title: 'Accessibility (required)',
+            granted: hasAccessibility,
+            opensSettings: true,
+            onGrant: onOpenAccessibility,
+          ),
+          const SizedBox(height: 12),
+          _PermissionRow(
             icon: Icons.visibility_outlined,
-            title: 'Usage access',
+            title: 'Usage access (optional)',
             granted: hasUsage,
             opensSettings: true,
             onGrant: onOpenUsage,
           ),
           const SizedBox(height: 12),
           _PermissionRow(
-            icon: Icons.layers_outlined,
-            title: 'Display over apps',
-            granted: hasOverlay,
-            opensSettings: true,
-            onGrant: onOpenOverlay,
-          ),
-          const SizedBox(height: 12),
-          _PermissionRow(
             icon: Icons.battery_charging_full_outlined,
-            title: 'Unrestricted battery (required)',
+            title: 'Unrestricted battery (recommended)',
             granted: hasBattery,
             opensSettings: false,
             onGrant: onRequestBattery,
           ),
           const SizedBox(height: 8),
           Text(
-            'Without this, many phones kill blocking overnight.',
+            'Usage access powers screen-time stats. Battery exemption helps on aggressive OEMs.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: AppTheme.onSurfaceVariant,
                 ),

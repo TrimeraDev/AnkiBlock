@@ -10,9 +10,6 @@ import '../utils/blocking_goal.dart';
 
 /// Outcome of [startScopedStudySession].
 class StudySessionStart {
-  /// True when a recent study bout already met the unlock goal.
-  final bool alreadyUnlocked;
-
   /// Whether AnkiDroid reviewer was opened.
   final bool openedAnki;
 
@@ -20,7 +17,6 @@ class StudySessionStart {
   final int target;
 
   const StudySessionStart({
-    required this.alreadyUnlocked,
     required this.openedAnki,
     required this.seeded,
     required this.target,
@@ -54,17 +50,11 @@ int resolveLaunchDeckId(
   return best?.id ?? allowedIds.first;
 }
 
-/// Cards to study in the next session.
-///
-/// Gate sessions always use the unlock goal. Home sessions use remaining
-/// daily cards (card-count mode) or min(obligation, unlock goal) (due mode).
-Future<int> resolveSessionTarget(
-  WidgetRef ref, {
-  bool forGate = false,
-}) async {
+/// Cards to study in the next home session: remaining daily cards
+/// (card-count mode) or min(obligation, unlock goal) (due mode).
+Future<int> resolveSessionTarget(WidgetRef ref) async {
   final rule = await ref.read(blockRuleProvider.future);
   final unlockGoal = rule?.cardsRequired ?? 10;
-  if (forGate) return unlockGoal;
 
   final mode = StudyMode.fromStorage(rule?.studyMode);
   if (mode == StudyMode.dueCards) {
@@ -89,88 +79,48 @@ Future<int> resolveSessionTarget(
   return remaining.clamp(1, dailyGoal);
 }
 
-/// Starts a tracked study session in AnkiDroid and opens the reviewer.
-/// When [unlockPackageName] is null, cards are tracked for today's stats only
-/// (no app unlock at the end). When set (study gate flow), completing the
-/// session unlocks that app.
-///
-/// If a recent study bout already meets the unlock goal, returns
-/// [StudySessionStart.alreadyUnlocked] without opening Anki.
+/// Starts a tracked practice session from inside AnkiBlock and opens the
+/// AnkiDroid reviewer. Cards count toward today's stats; no app is unlocked at
+/// the end (the blocked-app unlock flow lives entirely in the native gate).
 Future<StudySessionStart> startScopedStudySession({
   required WidgetRef ref,
   required StudyScope scope,
   required List<AnkiDroidDeck> decks,
   required int cardsRequired,
-  String? unlockPackageName,
-  String? unlockAppName,
-  bool forGate = false,
 }) async {
   final allowedIds = scope.filterDeckIds(decks.map((d) => d.id));
   if (allowedIds.isEmpty) {
-    return const StudySessionStart(
-      alreadyUnlocked: false,
-      openedAnki: false,
-      seeded: 0,
-      target: 0,
-    );
+    return const StudySessionStart(openedAnki: false, seeded: 0, target: 0);
   }
 
   final launchDeckId = resolveLaunchDeckId(scope, decks, allowedIds);
   final apps = ref.read(appsServiceProvider);
   final anki = ref.read(ankiDroidServiceProvider);
 
-  final target = cardsRequired > 0
-      ? cardsRequired
-      : await resolveSessionTarget(ref, forGate: forGate);
+  final target =
+      cardsRequired > 0 ? cardsRequired : await resolveSessionTarget(ref);
 
   await syncStudyScopeToNative(ref);
-  await ensureAppMonitorRunning(ref);
-  await apps.startAppMonitor();
   final result = await apps.startDelegatedSession(
-    packageName: unlockPackageName ?? kPracticeStudyPackage,
-    appName: unlockAppName ?? 'Study',
+    packageName: kPracticeStudyPackage,
+    appName: 'Study',
     deckId: launchDeckId,
     deckIds: allowedIds,
     target: target,
   );
 
-  if (result.unlocked) {
-    ref.read(delegatedSessionProgressProvider.notifier).state = null;
-    ref.read(delegatedProgressCreditFloorProvider.notifier).state = 0;
-    return StudySessionStart(
-      alreadyUnlocked: true,
-      openedAnki: false,
-      seeded: result.seeded,
-      target: result.target,
-    );
-  }
-
   ref.read(delegatedProgressCreditFloorProvider.notifier).state = result.seeded;
-  final pkg = unlockPackageName ?? kPracticeStudyPackage;
   ref.read(delegatedSessionProgressProvider.notifier).state =
       DelegatedSessionProgress(
     completed: result.seeded,
     target: result.target,
-    packageName: pkg,
+    packageName: kPracticeStudyPackage,
   );
 
   final opened = await anki.openAnkiDroidReviewer(launchDeckId);
   return StudySessionStart(
-    alreadyUnlocked: false,
     openedAnki: opened,
     seeded: result.seeded,
     target: result.target,
   );
-}
-
-/// Opens AnkiDroid without starting a tracked session (legacy).
-Future<bool> openScopedAnkiDroidReviewer({
-  required StudyScope scope,
-  required List<AnkiDroidDeck> decks,
-  required AnkiDroidService anki,
-}) async {
-  final allowedIds = scope.filterDeckIds(decks.map((d) => d.id));
-  if (allowedIds.isEmpty) return false;
-  final launchDeckId = resolveLaunchDeckId(scope, decks, allowedIds);
-  return anki.openAnkiDroidReviewer(launchDeckId);
 }

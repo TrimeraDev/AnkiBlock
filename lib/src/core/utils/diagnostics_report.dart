@@ -145,14 +145,15 @@ String formatDiagnosticsReport(DiagnosticsInputs input) {
     'Android SDK: ${d['androidSdk'] ?? '?'}',
     '',
     '--- Permissions ---',
+    'Accessibility: ${yesNo(d['accessibility'] == true || input.protection.accessibility)}',
     'Usage access: ${yesNo(d['usage'] == true || input.protection.usage)}',
-    'Overlay: ${yesNo(d['overlay'] == true || input.protection.overlay)}',
     'Battery unrestricted: ${yesNo(d['batteryUnrestricted'] == true || input.protection.batteryUnrestricted)}',
     'Protection active: ${yesNo(d['protectionActive'] == true || input.protection.protectionActive)}',
     if (!input.protection.protectionActive)
       '  (blocked=${input.protection.hasBlockedApps}, '
           'enabled=${input.protection.blockingEnabled}, '
-          'monitor=${input.protection.monitorRunning})',
+          'a11y=${input.protection.accessibility}, '
+          'engine=${input.protection.monitorRunning})',
     '',
     '--- Blocking config (Flutter DB) ---',
     'Rule enabled: ${yesNo(rule?.isEnabled ?? true)}',
@@ -170,14 +171,17 @@ String formatDiagnosticsReport(DiagnosticsInputs input) {
     '--- Blocking config (native sync) ---',
     'Native enabled: ${yesNo(d['blockingEnabled'] == true)}',
     'Native blocked count: ${d['blockedAppCount'] ?? '?'}',
-    'Active temp unlocks: ${d['activeUnlockCount'] ?? 0}',
+    'Unlock window: ${((d['unlockRemainingMs'] as num?)?.toInt() ?? 0) > 0 ? '${agoDuration(d['unlockRemainingMs'])} left' : 'locked'}',
     'Study mode: ${d['studyMode'] ?? '?'}',
     'Unlock goal: ${d['unlockGoalCards'] ?? '?'} cards',
     'Unlock duration: ${d['unlockDurationMin'] ?? '?'} min',
-    'Bypass: ${yesNo(d['bypassEnabled'] == true)}, ${d['bypassSeconds'] ?? '?'}s',
+    'Bypass: ${yesNo(d['bypassEnabled'] == true)}, ${d['bypassSeconds'] ?? '?'}s, '
+        'cap ${d['bypassDailyCap'] ?? '?'}/day',
     'Study day: ${d['studyDayKey'] ?? studyDayKey()}',
     'Daily progress: ${d['dailyReviewed'] ?? 0}/${d['dailyGoal'] ?? rule?.dailyCardsGoal ?? 30}',
     'Study bout cards: ${d['studyBoutCount'] ?? 0}',
+    'Native today: attempts ${d['blockedAttempts'] ?? 0}, '
+        'bypasses ${d['bypassesUsed'] ?? 0}, unlocks ${d['unlocksEarned'] ?? 0}',
     '',
     '--- Study scope ---',
     scopeSummary(input.scope, input.deckCount, input.scopedDeckCount),
@@ -189,26 +193,18 @@ String formatDiagnosticsReport(DiagnosticsInputs input) {
       'Due in scope: L=${input.counts.learnCount} '
           'R=${input.counts.reviewCount} N=${input.counts.newCount}',
     '',
-    '--- Monitor / background ---',
+    '--- Accessibility monitor ---',
     'Should run: ${yesNo(d['shouldStartMonitor'] == true)}',
-    'Process alive: ${yesNo(d['monitorProcessAlive'] == true)}',
-    'Poll stale: ${yesNo(d['pollStale'] == true)}',
+    'Enabled in Settings: ${yesNo(d['accessibilityEnabled'] == true)}',
+    'Service connected: ${yesNo(d['engineConnected'] == true)}',
     'Monitor healthy: ${yesNo(d['monitorRunning'] == true)}',
-    'Last poll: ${agoDuration(d['lastPollAgeMs'])} ago',
-    'Monitor restarts: ${d['monitorRestarts'] ?? 0}',
-    'Poll stale events: ${d['pollStaleCount'] ?? 0}',
-    'Protection-down alerts: ${d['protectionAlertCount'] ?? 0}',
+    'Last event: ${agoDuration(d['lastEventAgeMs'])} ago',
+    'Service (re)connects: ${d['monitorRestarts'] ?? 0}',
     '',
-    '--- Study gate ---',
-    'Last launch: ${agoMs(d['lastGateLaunchMs'])}',
-    'Last ready: ${agoMs(d['lastGateReadyMs'])}',
-    'Total launches: ${d['gateLaunchCount'] ?? 0}',
-    'Blank timeouts: ${d['blankTimeoutCount'] ?? 0} '
-        '(last ${agoMs(d['lastBlankTimeoutMs'])})',
-    'Flutter gate ready flag: ${yesNo(d['flutterGateReady'] == true)}',
-    'Engine idle: ${agoDuration(d['engineAgeMs'])} '
-        '(recycles: ${d['engineRecycleCount'] ?? 0})',
-    'Engine stale: ${yesNo(d['engineStale'] == true)}',
+    '--- Study gate (native overlay) ---',
+    'Showing now: ${yesNo(d['gateShowing'] == true)}',
+    'Last shown: ${agoMs(d['lastGateShownMs'])}',
+    'Total shown: ${d['gateShownCount'] ?? 0}',
     if (d['delegatedSessionActive'] == true)
       'Delegated session: ${d['delegatedCompleted']}/${d['delegatedTarget']} '
           'for ${d['delegatedPackage']}'

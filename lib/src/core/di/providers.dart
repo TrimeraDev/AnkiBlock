@@ -24,7 +24,7 @@ final permissionServiceProvider = Provider<PermissionService>((ref) {
   return PermissionService();
 });
 
-/// Usage access + overlay + monitor/battery state (Android). Powers the global
+/// Accessibility + optional usage/overlay state (Android). Powers the global
 /// protection banner and permissions screen.
 final protectionStatusProvider =
     FutureProvider<ProtectionStatus>((ref) async {
@@ -32,12 +32,11 @@ final protectionStatusProvider =
   return perm.getProtectionStatus();
 });
 
-/// Usage access + "display over other apps" (Android). Powers the global
-/// "missing permissions" banner.
+/// Accessibility required for blocking; usage optional for screen-time stats.
 final blockingPermissionsProvider =
-    FutureProvider<({bool usage, bool overlay})>((ref) async {
+    FutureProvider<({bool accessibility, bool usage})>((ref) async {
   final status = await ref.watch(protectionStatusProvider.future);
-  return (usage: status.usage, overlay: status.overlay);
+  return (accessibility: status.accessibility, usage: status.usage);
 });
 
 final appsServiceProvider = Provider<AppsService>((ref) {
@@ -208,17 +207,6 @@ final studyProgressProvider = FutureProvider<StudyProgressOverview>((ref) async 
 final studyStreakProvider = FutureProvider<int>((ref) async {
   final overview = await ref.watch(studyProgressProvider.future);
   return overview.streak;
-});
-
-/// Today's pickups and screen time across blocked apps (usage access required).
-final gateTodayUsageProvider =
-    FutureProvider.family<TodayBlockedUsage, String>((ref, focusPackage) async {
-  final blocked = await ref.watch(activeBlockedAppsProvider.future);
-  if (blocked.isEmpty) return TodayBlockedUsage.zero;
-  return ref.read(appsServiceProvider).getTodayBlockedUsage(
-        packages: blocked.map((b) => b.packageName).toList(),
-        focusPackage: focusPackage,
-      );
 });
 
 /// Live progress while a delegated AnkiDroid study session is running.

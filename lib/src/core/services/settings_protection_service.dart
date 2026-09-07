@@ -97,7 +97,6 @@ class SettingsProtectionService {
       scope: scope,
       decks: decks,
       cardsRequired: unlockGoal,
-      forGate: false,
     );
   }
 

@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">AnkiBlock</string>
+    <string name="accessibility_service_description">
+        AnkiBlock uses Accessibility to detect when you open a blocked app so it can
+        show your flashcard study gate. It does not read screen content, passwords,
+        or personal messages, and never sends this data off your device.
+    </string>
 </resources>

@@ -5,13 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/di/providers.dart';
 import 'core/navigation/router.dart';
-import 'core/services/ankidroid_service.dart';
 import 'core/services/apps_service.dart';
 import 'core/services/settings_protection_service.dart';
 import 'core/setup/setup_actions.dart';
 import 'core/theme/app_theme.dart';
 import 'core/utils/study_day.dart';
-import 'core/utils/blocking_goal.dart';
 import 'core/widgets/global_blocking_permission_banner.dart';
 
 class AnkiBlockApp extends ConsumerStatefulWidget {
@@ -23,8 +21,6 @@ class AnkiBlockApp extends ConsumerStatefulWidget {
 
 class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
     with WidgetsBindingObserver {
-  StreamSubscription<GateRequest>? _gateSub;
-  StreamSubscription<void>? _openHomeSub;
   StreamSubscription<int>? _delegatedUnlockSub;
   StreamSubscription<DelegatedSessionProgress>? _delegatedProgressSub;
   StreamSubscription<int>? _passiveStudySub;
@@ -71,10 +67,9 @@ class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
   }
 
   Future<void> _onResume() async {
-    await mergeDailyFromNative(ref);
+    await _mergeFromNative();
     await syncStudyScopeToNative(ref);
     await syncBlockRuleToNative(ref);
-    await ensureAppMonitorRunning(ref);
     await syncDailyGoalToNative(ref);
     await _restoreDelegatedSessionProgress();
     // Refresh live Anki due counts after studying (or any background trip).
@@ -84,9 +79,18 @@ class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
     ref.invalidate(dailyStatsProvider(studyDayKey()));
   }
 
+  /// Pulls native-owned stats. Unlocks earned through the native gate while
+  /// Flutter was not running also settle any strict-protection study debt.
+  Future<void> _mergeFromNative() async {
+    final newUnlocks = await mergeDailyFromNative(ref);
+    if (newUnlocks > 0) {
+      await _settleStrictStudy();
+    }
+  }
+
   Future<void> _restoreDelegatedSessionProgress() async {
     final state = await ref.read(appsServiceProvider).getDelegatedSessionState();
-    if (state == null || state.packageName == kPracticeStudyPackage) {
+    if (state == null || state.packageName != kPracticeStudyPackage) {
       return;
     }
     final existing = ref.read(delegatedSessionProgressProvider);
@@ -112,14 +116,11 @@ class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
     if (!status.isReady) return;
     await syncStudyScopeToNative(ref);
     await syncBlockRuleToNative(ref);
-    await ensureAppMonitorRunning(ref);
     await syncDailyGoalToNative(ref);
   }
 
   Future<void> _bootstrap() async {
     final svc = ref.read(appsServiceProvider);
-    _gateSub = svc.gateRequests.listen(_handleGate);
-    _openHomeSub = svc.openHomeRequests.listen((_) => _openHome());
     _delegatedUnlockSub = svc.delegatedUnlocks.listen(_handleDelegatedUnlock);
     _delegatedProgressSub = svc.delegatedProgress.listen((progress) async {
       ref.read(delegatedSessionProgressProvider.notifier).state = progress;
@@ -146,12 +147,6 @@ class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
       ref.invalidate(studyProgressProvider);
     });
 
-    // Gate from cold start: route immediately, sync in background.
-    final pending = await svc.consumePendingGate();
-    if (pending != null) {
-      _handleGate(pending);
-    }
-
     unawaited(_syncBootstrap());
   }
 
@@ -166,124 +161,36 @@ class _AnkiBlockAppState extends ConsumerState<AnkiBlockApp>
     await svc.setBlockedPackages(active);
     await syncStudyScopeToNative(ref);
     await syncBlockRuleToNative(ref);
-    await mergeDailyFromNative(ref);
-    await ensureAppMonitorRunning(ref);
+    await _mergeFromNative();
     await syncDailyGoalToNative(ref);
 
     unawaited(_syncNativeWhenAnkiReady());
     unawaited(ref.read(installedAppsProvider.future));
   }
 
-  void _handleGate(GateRequest req) {
-    unawaited(_routeGate(req));
-  }
-
-  void _openHome() {
-    ref.read(routerProvider).go('/');
-  }
-
-  Future<void> _routeGate(GateRequest req) async {
-    final router = ref.read(routerProvider);
-
-    // Paint the gate immediately — never wait on AnkiDroid / Drift before
-    // navigation. Overnight hangs on ContentProvider used to leave a blank
-    // MainActivity while native blocking had already fired.
-    router.go('/gate', extra: {
-      'packageName': req.packageName,
-      'appName': req.appName,
-    });
-    // StudyGateScreen signals ready after its first frame paints — calling
-    // here dismissed the native splash before Flutter rendered (blank screen).
-    unawaited(_restoreDelegatedSessionProgress());
-    unawaited(_resolveGateShortcuts(req));
-  }
-
-  /// After the gate is visible, skip it when the user is already free.
-  Future<void> _resolveGateShortcuts(GateRequest req) async {
-    final router = ref.read(routerProvider);
-    final apps = ref.read(appsServiceProvider);
-    try {
-      final unlocked = await apps
-          .isTemporarilyUnlocked(req.packageName)
-          .timeout(const Duration(seconds: 2), onTimeout: () => false);
-      if (unlocked) {
-        await apps.launchApp(req.packageName);
-        router.go('/');
-        return;
-      }
-
-      final rule = await ref
-          .read(blockRuleProvider.future)
-          .timeout(const Duration(seconds: 2));
-      final unlockGoal = rule?.cardsRequired ?? 10;
-      if (await apps
-          .tryUnlockFromRecentBout(
-            packageName: req.packageName,
-            appName: req.appName,
-            target: unlockGoal,
-          )
-          .timeout(const Duration(seconds: 2), onTimeout: () => false)) {
-        await apps.launchApp(req.packageName);
-        router.go('/');
-        return;
-      }
-
-      final day = studyDayKey();
-      final reviewed = (await ref
-                  .read(databaseProvider)
-                  .getDailyStat(day)
-                  .timeout(const Duration(seconds: 2)))
-              ?.cardsReviewed ??
-          0;
-      final mode = StudyMode.fromStorage(rule?.studyMode);
-      // Bound AnkiDroid due-count lookup — hang must not strand the gate.
-      int due = 0;
-      try {
-        final counts = await ref.read(studyCountsProvider.future).timeout(
-              const Duration(seconds: 2),
-              onTimeout: () => AnkiDroidCounts.zero,
-            );
-        due = counts.obligationDue;
-      } catch (_) {
-        due = 0;
-      }
-      if (isBlockingGoalComplete(
-        mode: mode,
-        dailyCardsGoal: rule?.dailyCardsGoal ?? 0,
-        cardsReviewed: reviewed,
-        obligationDue: due,
-      )) {
-        await apps.launchApp(req.packageName);
-        router.go('/');
-      }
-    } catch (_) {
-      // Keep the gate visible on any shortcut-check failure.
-    }
-  }
-
-  Future<void> _handleDelegatedUnlock(int cardsCompleted) async {
+  Future<void> _settleStrictStudy() async {
     final protectionSvc = ref.read(settingsProtectionServiceProvider);
     if (await protectionSvc.consumeStrictStudyPending()) {
       await protectionSvc.recordStrictStudyCompleted();
     }
+  }
+
+  /// Live unlock while Flutter is running (practice / strict-study session
+  /// completed, or a gate unlock while AnkiBlock sits in the background).
+  Future<void> _handleDelegatedUnlock(int cardsCompleted) async {
+    await _settleStrictStudy();
     ref.read(delegatedSessionProgressProvider.notifier).state = null;
     ref.read(delegatedProgressCreditFloorProvider.notifier).state = 0;
     _lastProgressCounted = 0;
-    final today = studyDayKey();
-    final db = ref.read(databaseProvider);
-    // Cards are credited incrementally via the progress listener.
-    await db.incrementUnlocksEarned(today);
-    await syncDailyGoalToNative(ref);
-    ref.invalidate(dailyStatsProvider(today));
-    ref.invalidate(studyProgressProvider);
+    // Cards are credited incrementally via the progress listener; the
+    // unlocks-earned counter is native-owned and merged on resume.
+    await mergeDailyFromNative(ref);
     ref.invalidate(studyCountsProvider);
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _gateSub?.cancel();
-    _openHomeSub?.cancel();
     _delegatedUnlockSub?.cancel();
     _delegatedProgressSub?.cancel();
     _passiveStudySub?.cancel();

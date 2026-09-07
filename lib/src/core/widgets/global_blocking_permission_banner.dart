@@ -79,24 +79,20 @@ class _SetupIssue {
     if (status == null) return null;
     if (!status.needsAttention) return null;
 
-    if (!status.usage || !status.overlay) {
-      final parts = <String>[
-        if (!status.usage) 'Usage access',
-        if (!status.overlay) 'Display over other apps',
-      ];
-      final label = parts.join(' and ');
-      final message = parts.length == 2
-          ? '$label are turned off. App blocking will not work until you enable them.'
-          : '$label is turned off. App blocking will not work until you enable it.';
-      return _SetupIssue(message: message, fixRoute: '/permissions');
+    if (!status.accessibility) {
+      return const _SetupIssue(
+        message:
+            'Accessibility is turned off. App blocking will not work until you enable AnkiBlock in Accessibility settings.',
+        fixRoute: '/permissions',
+      );
     }
     if (status.hasBlockedApps &&
         status.blockingEnabled &&
         !status.monitorRunning) {
       return const _SetupIssue(
         message:
-            'App blocking is not active. Open AnkiBlock or check Permissions '
-            'to restart protection after a reboot.',
+            'App blocking is not active. Open Permissions and re-enable the '
+            'AnkiBlock Accessibility service after a reboot.',
         fixRoute: '/permissions',
       );
     }

@@ -6,34 +6,6 @@ import 'package:flutter/services.dart';
 
 import '../database/database.dart';
 
-class GateRequest {
-  final String packageName;
-  final String appName;
-  GateRequest(this.packageName, this.appName);
-}
-
-/// Today's pickups and screen time for blocked apps (from UsageStats).
-class TodayBlockedUsage {
-  final int totalPickups;
-  final Duration totalScreenTime;
-  final int focusPickups;
-  final Duration focusScreenTime;
-
-  const TodayBlockedUsage({
-    required this.totalPickups,
-    required this.totalScreenTime,
-    required this.focusPickups,
-    required this.focusScreenTime,
-  });
-
-  static const zero = TodayBlockedUsage(
-    totalPickups: 0,
-    totalScreenTime: Duration.zero,
-    focusPickups: 0,
-    focusScreenTime: Duration.zero,
-  );
-}
-
 class InstalledApp {
   final String packageName;
   final String appName;
@@ -129,14 +101,13 @@ class DelegatedSessionProgress {
       packageName.isNotEmpty && packageName == pkg;
 }
 
-/// Result of starting a native delegated session (may already be unlocked).
+/// Result of starting a native delegated (practice) session.
 class DelegatedSessionStartResult {
-  final bool unlocked;
+  /// Cards already credited from a recent study bout.
   final int seeded;
   final int target;
 
   const DelegatedSessionStartResult({
-    required this.unlocked,
     required this.seeded,
     required this.target,
   });
@@ -157,16 +128,29 @@ class DelegatedSessionState {
   });
 }
 
+/// Native mirror of today's study state plus the gate counters native owns.
 class NativeDailyGoalState {
   final String studyDayKey;
   final int dailyGoal;
   final int cardsReviewed;
+  final int blockedAttempts;
+  final int bypassesUsed;
+  final int unlocksEarned;
 
   const NativeDailyGoalState({
     required this.studyDayKey,
     required this.dailyGoal,
     required this.cardsReviewed,
+    this.blockedAttempts = 0,
+    this.bypassesUsed = 0,
+    this.unlocksEarned = 0,
   });
+
+  static const empty = NativeDailyGoalState(
+    studyDayKey: '',
+    dailyGoal: 0,
+    cardsReviewed: 0,
+  );
 }
 
 class AppsService {
@@ -174,31 +158,6 @@ class AppsService {
 
   AppsService() {
     _channel.setMethodCallHandler(_handleNativeCall);
-  }
-
-  /// Replay buffer: last gate is delivered to late subscribers (bootstrap race).
-  final _gateController = StreamController<GateRequest>.broadcast();
-  GateRequest? _pendingGateReplay;
-
-  Stream<GateRequest> get gateRequests async* {
-    final pending = _pendingGateReplay;
-    if (pending != null) {
-      _pendingGateReplay = null;
-      yield pending;
-    }
-    yield* _gateController.stream;
-  }
-
-  final _openHomeController = StreamController<void>.broadcast();
-  bool _pendingOpenHomeReplay = false;
-
-  /// Launcher / normal app open — leave the study gate and show Today.
-  Stream<void> get openHomeRequests async* {
-    if (_pendingOpenHomeReplay) {
-      _pendingOpenHomeReplay = false;
-      yield null;
-    }
-    yield* _openHomeController.stream;
   }
 
   final _delegatedUnlockController = StreamController<int>.broadcast();
@@ -213,33 +172,8 @@ class AppsService {
   /// Cards credited from organic AnkiDroid study (not via AnkiBlock session).
   Stream<int> get passiveStudyProgress => _passiveStudyController.stream;
 
-  void _emitGate(GateRequest req) {
-    if (_gateController.hasListener) {
-      _gateController.add(req);
-    } else {
-      _pendingGateReplay = req;
-    }
-  }
-
-  void _emitOpenHome() {
-    _pendingGateReplay = null;
-    if (_openHomeController.hasListener) {
-      _openHomeController.add(null);
-    } else {
-      _pendingOpenHomeReplay = true;
-    }
-  }
-
   Future<dynamic> _handleNativeCall(MethodCall call) async {
-    if (call.method == 'openGate') {
-      final args = Map<String, dynamic>.from(call.arguments as Map);
-      _emitGate(GateRequest(
-        args['packageName'] as String? ?? '',
-        args['appName'] as String? ?? '',
-      ));
-    } else if (call.method == 'openHome') {
-      _emitOpenHome();
-    } else if (call.method == 'onDelegatedProgress') {
+    if (call.method == 'onDelegatedProgress') {
       final args = Map<String, dynamic>.from(call.arguments as Map);
       final completed = (args['completed'] as num?)?.toInt() ?? 0;
       final target = (args['target'] as num?)?.toInt() ?? 0;
@@ -274,38 +208,6 @@ class AppsService {
     });
   }
 
-  Future<void> startAppMonitor() async {
-    if (!Platform.isAndroid) return;
-    await _channel.invokeMethod('startAppMonitor');
-  }
-
-  Future<void> stopAppMonitor() async {
-    if (!Platform.isAndroid) return;
-    await _channel.invokeMethod('stopAppMonitor');
-  }
-
-  Future<void> grantTempUnlock(
-    String packageName, {
-    int? durationMs,
-  }) async {
-    if (!Platform.isAndroid) return;
-    await _channel.invokeMethod('grantTempUnlock', {
-      'packageName': packageName,
-      if (durationMs != null) 'durationMs': durationMs,
-    });
-  }
-
-  Future<void> grantBypass(
-    String packageName, {
-    int? durationMs,
-  }) async {
-    if (!Platform.isAndroid) return;
-    await _channel.invokeMethod('grantBypass', {
-      'packageName': packageName,
-      if (durationMs != null) 'durationMs': durationMs,
-    });
-  }
-
   Future<void> syncBlockRuleSettings({
     required int unlockDurationMinutes,
     required int bypassSeconds,
@@ -313,6 +215,7 @@ class AppsService {
     required String studyMode,
     required int unlockGoal,
     required bool bypassEnabled,
+    required int bypassDailyCap,
   }) async {
     if (!Platform.isAndroid) return;
     await _channel.invokeMethod('syncBlockRuleSettings', {
@@ -322,6 +225,7 @@ class AppsService {
       'studyMode': studyMode,
       'unlockGoal': unlockGoal,
       'bypassEnabled': bypassEnabled,
+      'bypassDailyCap': bypassDailyCap,
     });
   }
 
@@ -348,36 +252,24 @@ class AppsService {
   }
 
   Future<NativeDailyGoalState> getDailyGoalState() async {
-    if (!Platform.isAndroid) {
-      return const NativeDailyGoalState(
-        studyDayKey: '',
-        dailyGoal: 0,
-        cardsReviewed: 0,
-      );
-    }
+    if (!Platform.isAndroid) return NativeDailyGoalState.empty;
     final raw = await _channel.invokeMethod<Map<dynamic, dynamic>>(
       'getDailyGoalState',
     );
-    if (raw == null) {
-      return const NativeDailyGoalState(
-        studyDayKey: '',
-        dailyGoal: 0,
-        cardsReviewed: 0,
-      );
-    }
+    if (raw == null) return NativeDailyGoalState.empty;
+    int n(String key) => (raw[key] as num?)?.toInt() ?? 0;
     return NativeDailyGoalState(
       studyDayKey: raw['studyDayKey'] as String? ?? '',
-      dailyGoal: (raw['dailyGoal'] as num?)?.toInt() ?? 0,
-      cardsReviewed: (raw['cardsReviewed'] as num?)?.toInt() ?? 0,
+      dailyGoal: n('dailyGoal'),
+      cardsReviewed: n('cardsReviewed'),
+      blockedAttempts: n('blockedAttempts'),
+      bypassesUsed: n('bypassesUsed'),
+      unlocksEarned: n('unlocksEarned'),
     );
   }
 
-  /// Starts a delegated study session tracked by [AppMonitorService] while the
-  /// user reviews in AnkiDroid. Progress is counted from schedule card keys /
-  /// reps only (not due-count diffs).
-  ///
-  /// Returns unlock/seed info from native. When [DelegatedSessionStartResult.unlocked]
-  /// is true, a recent study bout already met the target — skip opening Anki.
+  /// Starts a practice session tracked natively while the user reviews in
+  /// AnkiDroid. Progress is counted from schedule card keys / reps only.
   Future<DelegatedSessionStartResult> startDelegatedSession({
     required String packageName,
     required String appName,
@@ -386,11 +278,7 @@ class AppsService {
     required int target,
   }) async {
     if (!Platform.isAndroid) {
-      return DelegatedSessionStartResult(
-        unlocked: false,
-        seeded: 0,
-        target: target,
-      );
+      return DelegatedSessionStartResult(seeded: 0, target: target);
     }
     final raw = await _channel.invokeMethod<dynamic>('startDelegatedSession', {
       'packageName': packageName,
@@ -401,21 +289,11 @@ class AppsService {
     });
     if (raw is Map) {
       return DelegatedSessionStartResult(
-        unlocked: raw['unlocked'] == true,
         seeded: (raw['seeded'] as num?)?.toInt() ?? 0,
         target: (raw['target'] as num?)?.toInt() ?? target,
       );
     }
-    return DelegatedSessionStartResult(
-      unlocked: false,
-      seeded: 0,
-      target: target,
-    );
-  }
-
-  Future<void> cancelDelegatedSession() async {
-    if (!Platform.isAndroid) return;
-    await _channel.invokeMethod('cancelDelegatedSession');
+    return DelegatedSessionStartResult(seeded: 0, target: target);
   }
 
   /// Restores in-progress unlock session progress after Flutter state loss.
@@ -434,64 +312,6 @@ class AppsService {
       target: target,
       seeded: (raw['seeded'] as num?)?.toInt() ?? 0,
     );
-  }
-
-  /// Recent soft-study bout size (cards within the idle gap).
-  Future<int> getStudyBoutCount() async {
-    if (!Platform.isAndroid) return 0;
-    final n = await _channel.invokeMethod<int>('getStudyBoutCount');
-    return n ?? 0;
-  }
-
-  /// Grants temp unlock when bout already meets [target]; otherwise false.
-  Future<bool> tryUnlockFromRecentBout({
-    required String packageName,
-    required String appName,
-    required int target,
-  }) async {
-    if (!Platform.isAndroid) return false;
-    final ok = await _channel.invokeMethod<bool>('tryUnlockFromRecentBout', {
-      'packageName': packageName,
-      'appName': appName,
-      'target': target,
-    });
-    return ok ?? false;
-  }
-
-  Future<bool> isTemporarilyUnlocked(String packageName) async {
-    if (!Platform.isAndroid) return false;
-    final ok = await _channel.invokeMethod<bool>('isTemporarilyUnlocked', {
-      'packageName': packageName,
-    });
-    return ok ?? false;
-  }
-
-  Future<bool> launchApp(String packageName) async {
-    if (!Platform.isAndroid) return false;
-    final ok = await _channel.invokeMethod<bool>('launchApp', {
-      'packageName': packageName,
-    });
-    return ok ?? false;
-  }
-
-  Future<GateRequest?> consumePendingGate() async {
-    if (!Platform.isAndroid) return null;
-    final raw = await _channel.invokeMethod<Map<dynamic, dynamic>>(
-      'consumePendingGate',
-    );
-    if (raw == null) return null;
-    return GateRequest(
-      raw['packageName'] as String? ?? '',
-      raw['appName'] as String? ?? '',
-    );
-  }
-
-  /// Tells native the Flutter gate painted so loading splash / fallback dismiss.
-  Future<void> signalGateReady() async {
-    if (!Platform.isAndroid) return;
-    try {
-      await _channel.invokeMethod('onGateReady');
-    } catch (_) {}
   }
 
   /// Health snapshot for the permissions diagnostics panel.
@@ -549,34 +369,6 @@ class AppsService {
       out[k as String] = Duration(milliseconds: ms);
     });
     return out;
-  }
-
-  /// Pickups and screen time today for [packages], with optional [focusPackage].
-  Future<TodayBlockedUsage> getTodayBlockedUsage({
-    required List<String> packages,
-    String? focusPackage,
-  }) async {
-    if (!Platform.isAndroid || packages.isEmpty) {
-      return TodayBlockedUsage.zero;
-    }
-    final raw = await _channel.invokeMethod<Map<dynamic, dynamic>>(
-      'getTodayBlockedUsage',
-      {
-        'packages': packages,
-        if (focusPackage != null) 'focusPackage': focusPackage,
-      },
-    );
-    if (raw == null) return TodayBlockedUsage.zero;
-    return TodayBlockedUsage(
-      totalPickups: (raw['totalPickups'] as num?)?.toInt() ?? 0,
-      totalScreenTime: Duration(
-        milliseconds: (raw['totalScreenTimeMs'] as num?)?.toInt() ?? 0,
-      ),
-      focusPickups: (raw['focusPickups'] as num?)?.toInt() ?? 0,
-      focusScreenTime: Duration(
-        milliseconds: (raw['focusScreenTimeMs'] as num?)?.toInt() ?? 0,
-      ),
-    );
   }
 
   Future<List<InstalledApp>> listAppsWithUsage({bool thisWeek = true}) async {

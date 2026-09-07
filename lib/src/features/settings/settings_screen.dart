@@ -251,7 +251,7 @@ class _SettingsBody extends ConsumerWidget {
         ListTile(
           leading: const Icon(Icons.lock_outline),
           title: const Text('Permissions & AnkiDroid'),
-          subtitle: const Text('Usage, overlay, battery, AnkiDroid'),
+          subtitle: const Text('Accessibility, usage, battery, AnkiDroid'),
           trailing: const Icon(Icons.chevron_right),
           onTap: () => context.push('/permissions'),
         ),

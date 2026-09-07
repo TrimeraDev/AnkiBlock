@@ -8,6 +8,7 @@ import '../../core/di/providers.dart';
 import '../../core/services/permission_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/diagnostics_report.dart';
+import '../../core/widgets/accessibility_disclosure.dart';
 
 class PermissionsScreen extends ConsumerStatefulWidget {
   const PermissionsScreen({super.key});
@@ -93,37 +94,53 @@ class _PermissionsScreenState extends ConsumerState<PermissionsScreen>
               children: [
                 if (status.hasBlockedApps &&
                     status.blockingEnabled &&
+                    !status.accessibility)
+                  const _StatusBanner(
+                    icon: Icons.shield_outlined,
+                    color: AppTheme.warning,
+                    message:
+                        'Accessibility is off. Enable AnkiBlock under '
+                        'Settings → Accessibility so blocked apps stay gated.',
+                  ),
+                if (status.hasBlockedApps &&
+                    status.blockingEnabled &&
+                    status.accessibility &&
                     !status.monitorRunning)
                   const _StatusBanner(
                     icon: Icons.shield_outlined,
                     color: AppTheme.warning,
                     message:
-                        'Blocking monitor is not running. It should restart '
-                        'automatically after reboot, but you can reopen AnkiBlock '
-                        'to force a restart.',
+                        'Accessibility is enabled but not connected yet. '
+                        'Toggle AnkiBlock off and on in Accessibility settings, '
+                        'or reopen the app after reboot.',
                   ),
                 const _SectionHeader(label: 'Blocking'),
                 _PermissionTile(
-                  icon: Icons.visibility_outlined,
-                  title: 'Usage Access',
+                  icon: Icons.accessibility_new_outlined,
+                  title: 'Accessibility',
                   subtitle:
-                      'Required to detect which app is currently in foreground.',
-                  granted: status.usage,
-                  onRequest: svc.openUsageAccessSettings,
+                      'Required to detect blocked apps instantly and show the study gate.',
+                  granted: status.accessibility,
+                  onRequest: () async {
+                    final ok = await showAccessibilityDisclosureDialog(context);
+                    if (!ok || !context.mounted) return;
+                    await svc.openAccessibilitySettings();
+                  },
                 ),
                 _PermissionTile(
-                  icon: Icons.layers_outlined,
-                  title: 'Display over other apps',
-                  subtitle: 'Required to show the study gate over blocked apps.',
-                  granted: status.overlay,
-                  onRequest: svc.openOverlaySettings,
+                  icon: Icons.visibility_outlined,
+                  title: 'Usage Access (optional)',
+                  subtitle:
+                      'Used for screen-time stats on the Today and Blocking screens.',
+                  granted: status.usage,
+                  onRequest: svc.openUsageAccessSettings,
                 ),
                 _PermissionTile(
                   icon: Icons.battery_charging_full_outlined,
                   title: 'Unrestricted battery',
                   subtitle:
-                      'Required so blocking survives overnight and reboot. '
-                      'Without this, OEMs may kill the monitor.',
+                      'Helps AnkiBlock survive overnight on aggressive OEMs. '
+                      'Accessibility usually stays bound without this, but it is still recommended.',
                   granted: status.batteryUnrestricted,
                   onRequest: svc.requestBatteryOptimizationExemption,
                 ),
@@ -167,10 +184,10 @@ class _PermissionsScreenState extends ConsumerState<PermissionsScreen>
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Text(
-                    'AnkiBlock restarts its monitor automatically after reboot. '
-                    'On some phones (Samsung, Xiaomi, Honor, Huawei, etc.) you may also '
-                    'need to enable autostart or remove AnkiBlock from sleeping-apps '
-                    'lists in system settings.',
+                    'AnkiBlock uses Accessibility to enforce blocking. After reboot, '
+                    'confirm AnkiBlock is still enabled under Accessibility. On some '
+                    'phones (Samsung, Xiaomi, Honor, Huawei, etc.) also enable '
+                    'autostart or remove AnkiBlock from sleeping-apps lists.',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: AppTheme.onSurface.withValues(alpha: 0.8),
                           height: 1.4,

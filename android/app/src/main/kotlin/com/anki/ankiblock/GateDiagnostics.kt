@@ -8,46 +8,26 @@ import android.os.Build
  */
 object GateDiagnostics {
     private const val PREFS = "ankiblock_gate_diagnostics"
-    private const val KEY_LAST_GATE_LAUNCH_MS = "last_gate_launch_ms"
-    private const val KEY_LAST_GATE_READY_MS = "last_gate_ready_ms"
-    private const val KEY_LAST_BLANK_TIMEOUT_MS = "last_blank_timeout_ms"
-    private const val KEY_BLANK_TIMEOUT_COUNT = "blank_timeout_count"
-    private const val KEY_LAST_POLL_MS = "last_poll_ms"
+    private const val KEY_LAST_GATE_SHOWN_MS = "last_gate_shown_ms"
+    private const val KEY_GATE_SHOWN_COUNT = "gate_shown_count"
+    private const val KEY_LAST_EVENT_MS = "last_event_ms"
     private const val KEY_MONITOR_RESTARTS = "monitor_restarts"
     private const val KEY_LAST_ERROR = "last_error"
-    private const val KEY_GATE_LAUNCH_COUNT = "gate_launch_count"
     private const val KEY_ERROR_COUNT = "error_count"
-    private const val KEY_POLL_STALE_COUNT = "poll_stale_count"
-    private const val KEY_PROTECTION_ALERT_COUNT = "protection_alert_count"
 
-    fun recordGateLaunch(context: Context) {
+    fun recordGateShown(context: Context) {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         prefs.edit()
-            .putLong(KEY_LAST_GATE_LAUNCH_MS, System.currentTimeMillis())
-            .putInt(KEY_GATE_LAUNCH_COUNT, prefs.getInt(KEY_GATE_LAUNCH_COUNT, 0) + 1)
+            .putLong(KEY_LAST_GATE_SHOWN_MS, System.currentTimeMillis())
+            .putInt(KEY_GATE_SHOWN_COUNT, prefs.getInt(KEY_GATE_SHOWN_COUNT, 0) + 1)
             .apply()
     }
 
-    fun recordGateReady(context: Context) {
+    /** Called on every accessibility window event (throttled by the caller). */
+    fun recordEvent(context: Context) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
-            .putLong(KEY_LAST_GATE_READY_MS, System.currentTimeMillis())
-            .apply()
-        AnkiBlockApplication.touchEngineActivity(context)
-    }
-
-    fun recordBlankTimeout(context: Context) {
-        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        prefs.edit()
-            .putLong(KEY_LAST_BLANK_TIMEOUT_MS, System.currentTimeMillis())
-            .putInt(KEY_BLANK_TIMEOUT_COUNT, prefs.getInt(KEY_BLANK_TIMEOUT_COUNT, 0) + 1)
-            .apply()
-    }
-
-    fun recordPoll(context: Context) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit()
-            .putLong(KEY_LAST_POLL_MS, System.currentTimeMillis())
+            .putLong(KEY_LAST_EVENT_MS, System.currentTimeMillis())
             .apply()
     }
 
@@ -55,23 +35,6 @@ object GateDiagnostics {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         prefs.edit()
             .putInt(KEY_MONITOR_RESTARTS, prefs.getInt(KEY_MONITOR_RESTARTS, 0) + 1)
-            .apply()
-    }
-
-    fun recordPollStale(context: Context) {
-        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        prefs.edit()
-            .putInt(KEY_POLL_STALE_COUNT, prefs.getInt(KEY_POLL_STALE_COUNT, 0) + 1)
-            .apply()
-    }
-
-    fun recordProtectionAlert(context: Context) {
-        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        prefs.edit()
-            .putInt(
-                KEY_PROTECTION_ALERT_COUNT,
-                prefs.getInt(KEY_PROTECTION_ALERT_COUNT, 0) + 1,
-            )
             .apply()
     }
 
@@ -94,13 +57,8 @@ object GateDiagnostics {
             .map { it.trim() }
             .filter { it.isNotEmpty() }
         val now = System.currentTimeMillis()
-        var activeUnlocks = 0
-        for (pkg in blocked) {
-            val until = blockPrefs.getLong("unlock_until_$pkg", 0L)
-            if (until > now) activeUnlocks++
-        }
-        val monitorAlive = AppMonitorService.isRunning()
-        val pollStale = AppMonitorService.isPollStale()
+        val engineConnected = AppMonitorService.isRunning()
+        val a11yEnabled = AnkiBlockAccessibilityService.isEnabled(context)
         val protection = ProtectionStatus.snapshot(context)
         val delegated = AppMonitorService.getDelegatedSessionState(context)
         val unlockMs = blockPrefs.getLong(
@@ -131,7 +89,7 @@ object GateDiagnostics {
             "appBuild" to versionInfo.second,
             // Permissions / protection
             "usage" to (protection["usage"] ?: false),
-            "overlay" to (protection["overlay"] ?: false),
+            "accessibility" to a11yEnabled,
             "batteryUnrestricted" to (protection["batteryUnrestricted"] ?: false),
             "hasBlockedApps" to (protection["hasBlockedApps"] ?: false),
             "blockingEnabled" to (protection["blockingEnabled"] ?: false),
@@ -139,7 +97,7 @@ object GateDiagnostics {
             "oemManufacturer" to (protection["oemManufacturer"] ?: "unknown"),
             // Blocking config (native mirror of Flutter block rule)
             "blockedAppCount" to blocked.size,
-            "activeUnlockCount" to activeUnlocks,
+            "unlockRemainingMs" to AppMonitorService.unlockRemainingMs(blockPrefs),
             "studyMode" to (
                 blockPrefs.getString(
                     AppMonitorService.KEY_STUDY_MODE,
@@ -156,40 +114,37 @@ object GateDiagnostics {
                 AppMonitorService.KEY_BYPASS_SECONDS,
                 AppMonitorService.DEFAULT_BYPASS_SECONDS,
             ),
+            "bypassDailyCap" to blockPrefs.getInt(
+                AppMonitorService.KEY_BYPASS_DAILY_CAP,
+                AppMonitorService.DEFAULT_BYPASS_DAILY_CAP,
+            ),
             "dailyGoal" to blockPrefs.getInt(AppMonitorService.KEY_DAILY_GOAL, 0),
             "dailyReviewed" to blockPrefs.getInt(
                 AppMonitorService.KEY_DAILY_REVIEWED,
                 0,
             ),
             "studyDayKey" to (blockPrefs.getString(AppMonitorService.KEY_STUDY_DAY, "") ?: ""),
-            "studyBoutCount" to AppMonitorService.peekStudyBoutCountPublic(context),
-            // Monitor health
+            "studyBoutCount" to AppMonitorService.peekStudyBoutCount(context),
+            // Today's native gate counters
+            "blockedAttempts" to GateStats.blockedAttempts(context),
+            "bypassesUsed" to GateStats.bypassesUsed(context),
+            "unlocksEarned" to GateStats.unlocksEarned(context),
+            // Monitor health (AccessibilityService)
             "shouldStartMonitor" to MonitorBootstrap.shouldStartMonitor(context),
-            "monitorProcessAlive" to monitorAlive,
-            "pollStale" to pollStale,
-            "monitorRunning" to (monitorAlive && !pollStale),
-            "lastPollAgeMs" to run {
-                val last = AppMonitorService.lastPollMs
+            "accessibilityEnabled" to a11yEnabled,
+            "engineConnected" to engineConnected,
+            "monitorRunning" to (a11yEnabled && engineConnected),
+            "lastEventAgeMs" to run {
+                val last = AppMonitorService.lastEventMs
                 if (last <= 0L) 0L else now - last
             },
-            "lastGateLaunchMs" to prefs.getLong(KEY_LAST_GATE_LAUNCH_MS, 0L),
-            "lastGateReadyMs" to prefs.getLong(KEY_LAST_GATE_READY_MS, 0L),
-            "lastBlankTimeoutMs" to prefs.getLong(KEY_LAST_BLANK_TIMEOUT_MS, 0L),
-            "blankTimeoutCount" to prefs.getInt(KEY_BLANK_TIMEOUT_COUNT, 0),
-            "lastPollMs" to prefs.getLong(KEY_LAST_POLL_MS, 0L),
+            "lastEventMs" to prefs.getLong(KEY_LAST_EVENT_MS, 0L),
             "monitorRestarts" to prefs.getInt(KEY_MONITOR_RESTARTS, 0),
-            "gateLaunchCount" to prefs.getInt(KEY_GATE_LAUNCH_COUNT, 0),
+            // Study gate (native overlay)
+            "gateShowing" to (AppMonitorService.engine?.isGateShowing() ?: false),
+            "lastGateShownMs" to prefs.getLong(KEY_LAST_GATE_SHOWN_MS, 0L),
+            "gateShownCount" to prefs.getInt(KEY_GATE_SHOWN_COUNT, 0),
             "errorCount" to prefs.getInt(KEY_ERROR_COUNT, 0),
-            "pollStaleCount" to prefs.getInt(KEY_POLL_STALE_COUNT, 0),
-            "protectionAlertCount" to prefs.getInt(KEY_PROTECTION_ALERT_COUNT, 0),
-            // Flutter engine
-            "engineAgeMs" to run {
-                val last = AnkiBlockApplication.lastEngineActivityMs(context)
-                if (last <= 0L) 0L else now - last
-            },
-            "engineRecycleCount" to AnkiBlockApplication.engineRecycleCount(context),
-            "engineStale" to AnkiBlockApplication.isEngineStale(context),
-            "flutterGateReady" to GateFallbackOverlay.isFlutterGateReady(),
             "lastError" to (prefs.getString(KEY_LAST_ERROR, "") ?: ""),
         )
 

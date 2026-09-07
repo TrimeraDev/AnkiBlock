@@ -321,49 +321,47 @@ class AppDatabase extends _$AppDatabase {
     }
   }
 
-  Future incrementUnlocksEarned(String date) async {
+  /// Raises today's gate counters to the native-owned values (never lowers).
+  /// Returns true when anything changed.
+  Future<bool> mergeGateCountersForDay(
+    String date, {
+    required int blockedAttempts,
+    required int bypassesUsed,
+    required int unlocksEarned,
+  }) async {
     final stat = await getDailyStat(date);
     if (stat == null) {
+      if (blockedAttempts <= 0 && bypassesUsed <= 0 && unlocksEarned <= 0) {
+        return false;
+      }
       await insertOrUpdateDailyStat(
         DailyStatsCompanion(
           date: Value(date),
-          unlocksEarned: const Value(1),
+          blockedAttempts: Value(blockedAttempts),
+          bypassesUsed: Value(bypassesUsed),
+          unlocksEarned: Value(unlocksEarned),
         ),
       );
-    } else {
-      await (update(dailyStats)..where((d) => d.date.equals(date))).write(
-          DailyStatsCompanion(unlocksEarned: Value(stat.unlocksEarned + 1)));
+      return true;
     }
-  }
-
-  Future incrementBlockedAttempts(String date) async {
-    final stat = await getDailyStat(date);
-    if (stat == null) {
-      await insertOrUpdateDailyStat(
-        DailyStatsCompanion(
-          date: Value(date),
-          blockedAttempts: const Value(1),
-        ),
-      );
-    } else {
-      await (update(dailyStats)..where((d) => d.date.equals(date))).write(
-          DailyStatsCompanion(
-              blockedAttempts: Value(stat.blockedAttempts + 1)));
+    final companion = DailyStatsCompanion(
+      blockedAttempts: blockedAttempts > stat.blockedAttempts
+          ? Value(blockedAttempts)
+          : const Value.absent(),
+      bypassesUsed: bypassesUsed > stat.bypassesUsed
+          ? Value(bypassesUsed)
+          : const Value.absent(),
+      unlocksEarned: unlocksEarned > stat.unlocksEarned
+          ? Value(unlocksEarned)
+          : const Value.absent(),
+    );
+    if (!companion.blockedAttempts.present &&
+        !companion.bypassesUsed.present &&
+        !companion.unlocksEarned.present) {
+      return false;
     }
-  }
-
-  Future incrementBypassesUsed(String date) async {
-    final stat = await getDailyStat(date);
-    if (stat == null) {
-      await insertOrUpdateDailyStat(
-        DailyStatsCompanion(
-          date: Value(date),
-          bypassesUsed: const Value(1),
-        ),
-      );
-    } else {
-      await (update(dailyStats)..where((d) => d.date.equals(date))).write(
-          DailyStatsCompanion(bypassesUsed: Value(stat.bypassesUsed + 1)));
-    }
+    await (update(dailyStats)..where((d) => d.date.equals(date)))
+        .write(companion);
+    return true;
   }
 }

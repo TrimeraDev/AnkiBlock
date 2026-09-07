@@ -3,42 +3,32 @@ package com.anki.ankiblock
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 
 object ProtectionStatus {
     fun snapshot(context: Context): Map<String, Any> {
+        val accessibility = AnkiBlockAccessibilityService.isEnabled(context)
         val usage = MonitorBootstrap.hasUsageAccess(context)
-        val overlay = hasOverlayPermission(context)
         val batteryUnrestricted = isIgnoringBatteryOptimizations(context)
-        val monitorRunning = AppMonitorService.isRunning() &&
-            !AppMonitorService.isPollStale()
+        val engineConnected = AppMonitorService.isRunning()
         val hasBlockedApps = MonitorBootstrap.hasBlockedPackages(context)
         val blockingEnabled = AppMonitorService.isBlockingEnabled(context)
         val protectionActive = hasBlockedApps &&
             blockingEnabled &&
-            usage &&
-            monitorRunning
+            accessibility &&
+            engineConnected
 
         return mapOf(
+            "accessibility" to accessibility,
             "usage" to usage,
-            "overlay" to overlay,
             "batteryUnrestricted" to batteryUnrestricted,
-            "monitorRunning" to monitorRunning,
+            "monitorRunning" to (accessibility && engineConnected),
             "hasBlockedApps" to hasBlockedApps,
             "blockingEnabled" to blockingEnabled,
             "protectionActive" to protectionActive,
             "oemManufacturer" to OemSettings.manufacturerKey(),
         )
-    }
-
-    fun hasOverlayPermission(context: Context): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            Settings.canDrawOverlays(context)
-        } else {
-            true
-        }
     }
 
     fun isIgnoringBatteryOptimizations(context: Context): Boolean {

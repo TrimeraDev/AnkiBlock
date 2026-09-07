@@ -1,12 +1,10 @@
 package com.anki.ankiblock
 
-import android.content.Context
+import android.accessibilityservice.AccessibilityService
 import android.content.Intent
 import android.graphics.PixelFormat
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.provider.Settings
 import android.util.Log
 import android.view.ContextThemeWrapper
 import android.view.Gravity
@@ -17,37 +15,25 @@ import android.widget.Button
 import android.widget.TextView
 
 /**
- * Draws a completion dialog over other apps (including AnkiDroid) using
- * [WindowManager] + [WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY].
+ * "You've studied N cards" dialog drawn over AnkiDroid with
+ * TYPE_ACCESSIBILITY_OVERLAY from [AnkiBlockAccessibilityService].
  */
-class CompletionOverlayManager(private val context: Context) {
+class CompletionOverlayManager(private val service: AccessibilityService) {
 
     companion object {
         private const val TAG = "AnkiBlock.Delegate"
     }
 
-    private val appContext = context.applicationContext
-
     private val windowManager =
-        context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        service.getSystemService(android.content.Context.WINDOW_SERVICE) as WindowManager
     private val mainHandler = Handler(Looper.getMainLooper())
     private var overlayView: View? = null
 
-    fun show(
-        appName: String,
-        packageName: String,
-        cardsCompleted: Int,
-        onDismiss: () -> Unit,
-    ) {
+    fun show(appName: String, packageName: String, cardsCompleted: Int) {
         mainHandler.post {
-            if (!canDrawOverlays()) {
-                Log.w(TAG, "overlay permission denied — granting unlock silently")
-                completeWithoutOverlay(packageName, onDismiss)
-                return@post
-            }
             dismissInternal()
             val themedContext = ContextThemeWrapper(
-                appContext,
+                service,
                 android.R.style.Theme_DeviceDefault_Light_Dialog,
             )
             val view = LayoutInflater.from(themedContext).inflate(
@@ -62,29 +48,18 @@ class CompletionOverlayManager(private val context: Context) {
             view.findViewById<Button>(R.id.btn_open_app).apply {
                 text = "Open $appName"
                 setOnClickListener {
-                    AppMonitorService.grantTempUnlockAllBlocked(context)
-                    AppMonitorService.dismissGateUi(context)
-                    launchApp(packageName)
                     dismissInternal()
-                    onDismiss()
+                    launchApp(packageName)
                 }
             }
             view.findViewById<Button>(R.id.btn_keep_studying).setOnClickListener {
-                AppMonitorService.dismissGateUi(context)
                 dismissInternal()
-                onDismiss()
             }
 
-            val overlayType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            } else {
-                @Suppress("DEPRECATION")
-                WindowManager.LayoutParams.TYPE_PHONE
-            }
             val params = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.MATCH_PARENT,
-                overlayType,
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                     WindowManager.LayoutParams.FLAG_DIM_BEHIND,
                 PixelFormat.TRANSLUCENT,
@@ -97,8 +72,9 @@ class CompletionOverlayManager(private val context: Context) {
                 overlayView = view
                 Log.i(TAG, "completion overlay shown for $appName ($cardsCompleted cards)")
             } catch (e: Exception) {
+                // Unlock was already granted by the caller; UI is best-effort.
                 Log.e(TAG, "completion overlay addView failed", e)
-                completeWithoutOverlay(packageName, onDismiss)
+                GateDiagnostics.recordError(service, "completion addView: ${e.message}")
             }
         }
     }
@@ -116,26 +92,12 @@ class CompletionOverlayManager(private val context: Context) {
         overlayView = null
     }
 
-    private fun completeWithoutOverlay(packageName: String, onDismiss: () -> Unit) {
-        AppMonitorService.grantTempUnlockAllBlocked(context)
-        AppMonitorService.dismissGateUi(context)
-        onDismiss()
-    }
-
-    private fun canDrawOverlays(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            Settings.canDrawOverlays(appContext)
-        } else {
-            true
-        }
-    }
-
     private fun launchApp(packageName: String) {
-        val launch = appContext.packageManager.getLaunchIntentForPackage(packageName)
+        val launch = service.packageManager.getLaunchIntentForPackage(packageName)
             ?: return
         launch.flags = Intent.FLAG_ACTIVITY_NEW_TASK
         try {
-            context.startActivity(launch)
+            service.startActivity(launch)
         } catch (_: Throwable) {
         }
     }
